@@ -146,6 +146,26 @@ function colorForChild(id) {
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return CHILD_PALETTE[hash % CHILD_PALETTE.length];
 }
+const TEACHER_PALETTE = [
+  { bg: "#EAE6F2", text: "#5A4A7A" }, // 보라
+  { bg: "#DDEEF0", text: "#2E6670" }, // 청록
+  { bg: "#F6EAD9", text: "#8A5A22" }, // 주황
+  { bg: "#E7EFE4", text: "#3F5B41" }, // 초록
+  { bg: "#F5E1E4", text: "#8C3B4C" }, // 로즈
+  { bg: "#E3E9EE", text: "#3C5066" }, // 슬레이트
+  { bg: "#FBE9D7", text: "#9C5A2E" }, // 갈색
+  { bg: "#E5EBF7", text: "#3E5A96" }, // 파랑
+];
+function colorForTeacher(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 17 + id.charCodeAt(i)) >>> 0;
+  return TEACHER_PALETTE[hash % TEACHER_PALETTE.length];
+}
+function teacherBadgeHtml(teacher) {
+  if (!teacher) return `<span style="font-size:11.5px;color:var(--ink-soft);">미배정</span>`;
+  const c = colorForTeacher(teacher.id);
+  return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:${c.bg};color:${c.text};">${esc(teacher.name)} 선생님</span>`;
+}
 function toDateStr(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${day}`;
@@ -226,6 +246,10 @@ function avatarHtml(name, colorId, size = 36) {
   const c = colorForChild(colorId || name || "x");
   return `<div class="avatar" style="width:${size}px;height:${size}px;background:${c.bg};color:${c.text};font-size:${size*0.4}px;">${esc(name ? name[0] : "?")}</div>`;
 }
+function teacherAvatarHtml(name, teacherId, size = 36) {
+  const c = colorForTeacher(teacherId || name || "x");
+  return `<div class="avatar" style="width:${size}px;height:${size}px;background:${c.bg};color:${c.text};font-size:${size*0.4}px;">${esc(name ? name[0] : "?")}</div>`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  전역 상태                                                          */
@@ -254,7 +278,7 @@ let TEACHER_LOGIN_ID = null;   // 이름 선택 후 PIN 입력 대기중인 교�
 let TEACHER_PIN_INPUT = "";
 let TEACHER_PIN_ERROR = "";
 
-// 팀장 화면: 새 교사 등록용 PIN 입력값 + 기존 교사 PIN 수정 상태
+// 관리자 화면: 새 교사 등록용 PIN 입력값 + 기존 교사 PIN 수정 상태
 let NEW_TEACHER_PIN = "";
 let EDIT_TEACHER_PIN_ID = null;
 let EDIT_TEACHER_PIN_VALUE = "";
@@ -299,12 +323,12 @@ function render() {
 function loginScreenHtml() {
   const teachersHtml = DATA.teachers.length === 0
     ? `<div style="text-align:center;padding:18px 6px;">
-        <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px;">아직 등록된 선생님이 없어요.<br/>팀장님이 먼저 로그인해서 선생님을 등록해주세요.</p>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px;">아직 등록된 선생님이 없어요.<br/>관리자님이 먼저 로그인해서 선생님을 등록해주세요.</p>
       </div>`
     : `<div style="display:grid;gap:8px;">
         ${DATA.teachers.map(t => `
           <button class="btn btn-ghost teacher-login-btn" data-id="${t.id}" style="justify-content:flex-start;padding:12px 14px;font-size:14.5px;">
-            ${avatarHtml(t.name, t.id, 30)}
+            ${teacherAvatarHtml(t.name, t.id, 30)}
             <span style="margin-left:4px;">${esc(t.name)} 선생님</span>
             <span style="margin-left:auto;">${icon('chevron', 16)}</span>
           </button>`).join("")}
@@ -315,7 +339,7 @@ function loginScreenHtml() {
       <div class="card fadein" style="width:100%;max-width:340px;padding:22px;">
         <div style="text-align:center;margin-bottom:14px;">
           ${icon('shield', 26, 'var(--moss)')}
-          <h2 style="font-size:17px;font-weight:700;margin:8px 0 2px;">팀장 로그인</h2>
+          <h2 style="font-size:17px;font-weight:700;margin:8px 0 2px;">관리자 로그인</h2>
           <p style="font-size:12.5px;color:var(--ink-soft);">PIN 번호를 입력해주세요</p>
         </div>
         <input id="pin-input" class="input" style="width:100%;text-align:center;letter-spacing:4px;font-size:18px;margin-bottom:8px;"
@@ -333,7 +357,7 @@ function loginScreenHtml() {
     <div class="modal-overlay" id="teacher-pin-overlay">
       <div class="card fadein" style="width:100%;max-width:340px;padding:22px;">
         <div style="text-align:center;margin-bottom:14px;">
-          ${avatarHtml(t.name, t.id, 44)}
+          ${teacherAvatarHtml(t.name, t.id, 44)}
           <h2 style="font-size:17px;font-weight:700;margin:10px 0 2px;">${esc(t.name)} 선생님</h2>
           <p style="font-size:12.5px;color:var(--ink-soft);">PIN 번호를 입력해주세요</p>
         </div>
@@ -356,7 +380,7 @@ function loginScreenHtml() {
         </div>
         <div class="card" style="padding:18px;">${teachersHtml}</div>
         <div style="text-align:center;margin-top:18px;">
-          <button id="admin-login-open" class="btn btn-ghost" style="padding:8px 16px;font-size:13px;color:var(--slate);">${icon('lock',13)} 팀장으로 로그인</button>
+          <button id="admin-login-open" class="btn btn-ghost" style="padding:8px 16px;font-size:13px;color:var(--slate);">${icon('lock',13)} 관리자로 로그인</button>
         </div>
       </div>
     </div>
@@ -415,7 +439,7 @@ function submitTeacherPin() {
     CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable";
     render();
   } else if (!expected) {
-    TEACHER_PIN_ERROR = "PIN이 아직 설정되지 않았어요. 팀장님께 문의해주세요.";
+    TEACHER_PIN_ERROR = "PIN이 아직 설정되지 않았어요. 관리자님께 문의해주세요.";
     render();
   } else {
     TEACHER_PIN_ERROR = "PIN 번호가 올바르지 않아요.";
@@ -454,9 +478,9 @@ function topBarHtml(roleLabel, subLabel, tabs, activeTab, tabAttr, extraHtml) {
 /* ------------------------------------------------------------------ */
 /*  시간표 그리드                                                       */
 /* ------------------------------------------------------------------ */
-function timetableGridHtml(entries, children) {
+function timetableGridHtml(entries, children, teacherColor) {
   if (entries.length === 0) {
-    return emptyStateHtml('calendar', "등록된 시간표가 없어요", "팀장님께 시간표 등록을 요청해보세요.");
+    return emptyStateHtml('calendar', "등록된 시간표가 없어요", "관리자님께 시간표 등록을 요청해보세요.");
   }
   const times = Array.from(new Set(entries.map(e => e.time))).sort();
   const childMap = {}; children.forEach(c => childMap[c.id] = c);
@@ -477,7 +501,7 @@ function timetableGridHtml(entries, children) {
                   ${cell.map(e => {
   const child = childMap[e.childId];
   if (!child) return "";
-  const c = colorForChild(child.id);
+  const c = teacherColor || colorForChild(child.id);
   return `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:6px 8px;font-size:12.5px;font-weight:700;text-align:center;">
     ${esc(child.name)}
     ${e.endTime ? `<div style="font-size:10px;font-weight:500;opacity:.75;margin-top:2px;">${esc(e.time)}~${esc(e.endTime)}</div>` : ""}
@@ -539,7 +563,7 @@ function teacherAppHtml() {
   } else if (TEACHER_TAB === "children") {
     body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">내 아동 목록</h2>`;
     if (myChildren.length === 0) {
-      body += emptyStateHtml('users', "아직 배정된 아동이 없어요", "팀장님이 담당 아동을 배정하면 여기에 표시돼요.");
+      body += emptyStateHtml('users', "아직 배정된 아동이 없어요", "관리자님이 담당 아동을 배정하면 여기에 표시돼요.");
     } else {
       body += `<div style="display:grid;gap:8px;">${myChildren.map(c => `
         <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
@@ -593,7 +617,7 @@ function teacherAppHtml() {
         if (!c.startDate) {
           return `<div class="card" style="padding:14px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">${avatarHtml(c.name,c.id,32)}<div style="font-weight:700;font-size:14px;">${esc(c.name)}</div></div>
-            <div style="font-size:12.5px;color:var(--ink-soft);">팀장님이 수업 시작일을 등록하면 휴강 체크를 할 수 있어요.</div>
+            <div style="font-size:12.5px;color:var(--ink-soft);">관리자님이 수업 시작일을 등록하면 휴강 체크를 할 수 있어요.</div>
           </div>`;
         }
         const dates = upcomingSessionDates(c, DATA.cancellations, 2, 4);
@@ -795,7 +819,7 @@ function attachTeacherEvents() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  팀장(관리자) 화면                                                    */
+/*  관리자 화면                                                    */
 /* ------------------------------------------------------------------ */
 function adminAppHtml() {
   const tabs = [
@@ -820,7 +844,7 @@ function adminAppHtml() {
           <h2 style="font-size:16px;font-weight:700;margin:0;">설정</h2>
           <button id="settings-close" class="btn btn-ghost" style="padding:6px;">${icon('x',16)}</button>
         </div>
-        <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);">팀장 PIN 변경</label>
+        <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);">관리자 PIN 변경</label>
         <div style="display:flex;gap:8px;margin-top:6px;">
           <input id="new-pin-input" class="input" style="flex:1;" placeholder="새 PIN (4자리 이상)" inputmode="numeric" />
           <button id="save-pin-btn" class="btn btn-primary" style="padding:0 14px;">저장</button>
@@ -830,7 +854,7 @@ function adminAppHtml() {
     </div>` : "";
 
   return `
-    ${topBarHtml("팀장 대시보드", `선생님 ${DATA.teachers.length}명 · 아동 ${DATA.children.length}명`, tabs, ADMIN_TAB, "tadmin", extra)}
+    ${topBarHtml("관리자 대시보드", `선생님 ${DATA.teachers.length}명 · 아동 ${DATA.children.length}명`, tabs, ADMIN_TAB, "tadmin", extra)}
     <div style="max-width:920px;margin:0 auto;padding:18px 16px 60px;">${body}</div>
     ${settingsModal}`;
 }
@@ -839,12 +863,13 @@ function teachersPanelHtml() {
   const rows = DATA.teachers.map(t => {
     const count = DATA.children.filter(c => c.teacherId === t.id).length;
     const isEditingPin = EDIT_TEACHER_PIN_ID === t.id;
+    const tc = colorForTeacher(t.id);
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:12px;">
-          ${avatarHtml(t.name, t.id, 38)}
+          ${teacherAvatarHtml(t.name, t.id, 38)}
           <div style="flex:1;">
-            <div style="font-weight:700;font-size:14.5px;">${esc(t.name)} 선생님</div>
+            <div style="font-weight:700;font-size:14.5px;color:${tc.text};">${esc(t.name)} 선생님</div>
             <div style="font-size:12px;color:var(--ink-soft);">담당 아동 ${count}명 · PIN ${t.pin ? "설정됨" : "미설정"}</div>
           </div>
           <button class="btn btn-ghost edit-teacher-pin-btn" data-id="${t.id}" style="padding:7px 10px;font-size:12px;">${icon('lock',13)} PIN</button>
@@ -913,7 +938,7 @@ function childrenPanelHtml() {
             <input type="date" class="input child-startdate-input" data-id="${c.id}" style="font-size:12.5px;padding:6px 8px;" value="${esc(c.startDate || "")}" />
           </label>
           <select class="select child-teacher-select" data-id="${c.id}" style="font-size:12.5px;">${options(c.teacherId)}</select>
-          ${!teacher ? `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>` : ""}
+          ${teacher ? teacherBadgeHtml(teacher) : `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>`}
         </div>
       </div>`;
   }).join("");
@@ -943,14 +968,25 @@ function childrenPanelHtml() {
 }
 
 function schedulePanelHtml() {
-  const scheduleTeacherTabs = `
+  if (!SCHEDULE_VIEW_TEACHER && DATA.teachers.length > 0) {
+    SCHEDULE_VIEW_TEACHER = DATA.teachers[0].id;
+  }
+  const activeTeacher = DATA.teachers.find(t => t.id === SCHEDULE_VIEW_TEACHER) || null;
+  const activeColor = activeTeacher ? colorForTeacher(activeTeacher.id) : null;
+
+  const scheduleTeacherTabs = DATA.teachers.length === 0 ? "" : `
     <div class="scrollbar" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;">
-      <div class="tab schedule-view-tab ${SCHEDULE_VIEW_TEACHER === "" ? "active" : ""}" data-id="">전체</div>
-      ${DATA.teachers.map(t => `<div class="tab schedule-view-tab ${SCHEDULE_VIEW_TEACHER === t.id ? "active" : ""}" data-id="${t.id}">${esc(t.name)} 선생님</div>`).join("")}
+      ${DATA.teachers.map(t => {
+        const tc = colorForTeacher(t.id);
+        const isActive = SCHEDULE_VIEW_TEACHER === t.id;
+        return `<div class="tab schedule-view-tab" data-id="${t.id}" style="background:${isActive ? tc.bg : "transparent"};color:${isActive ? tc.text : "var(--ink-soft)"};border:1px solid ${isActive ? tc.bg : "var(--line)"};">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${tc.text};margin-right:2px;"></span>${esc(t.name)} 선생님
+        </div>`;
+      }).join("")}
     </div>`;
-  const gridChildIds = SCHEDULE_VIEW_TEACHER ? new Set(DATA.children.filter(c => c.teacherId === SCHEDULE_VIEW_TEACHER).map(c => c.id)) : null;
-  const gridEntries = gridChildIds ? DATA.schedule.filter(s => gridChildIds.has(s.childId)) : DATA.schedule;
-  const gridChildren = gridChildIds ? DATA.children.filter(c => gridChildIds.has(c.id)) : DATA.children;
+  const gridChildIds = activeTeacher ? new Set(DATA.children.filter(c => c.teacherId === activeTeacher.id).map(c => c.id)) : new Set();
+  const gridEntries = DATA.schedule.filter(s => gridChildIds.has(s.childId));
+  const gridChildren = DATA.children.filter(c => gridChildIds.has(c.id));
 
   const childOptions = `<option value="">아동 선택</option>` + DATA.children.map(c => {
     const t = DATA.teachers.find(tt => tt.id === c.teacherId);
@@ -967,7 +1003,7 @@ function schedulePanelHtml() {
         <div style="font-weight:700;font-size:13px;width:40px;">${s.day}</div>
        <div style="font-size:13px;color:var(--ink-soft);white-space:nowrap;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}${s.endTime ? ` ~ ${s.endTime}` : ""}</div>
         <div style="flex:1;font-size:13.5px;font-weight:600;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
-        <div style="font-size:12px;color:var(--ink-soft);">${teacher ? `${esc(teacher.name)} 선생님` : "미배정"}</div>
+        ${teacherBadgeHtml(teacher)}
         ${PENDING_DELETE && PENDING_DELETE.type === "schedule" && PENDING_DELETE.id === s.id
           ? confirmInlineHtml("schedule", s.id)
           : `<button class="btn btn-ghost del-schedule-btn" data-id="${s.id}" style="padding:6px;">${icon('trash',13)}</button>`}
@@ -975,9 +1011,10 @@ function schedulePanelHtml() {
   }).join("");
 
   return `
-    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">전체 시간표</h2>
-    ${scheduleTeacherTabs}
-    ${timetableGridHtml(gridEntries, gridChildren)}
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">교사별 시간표</h2>
+    ${DATA.teachers.length === 0
+      ? emptyStateHtml('users', "등록된 선생님이 없어요", "먼저 교사 관리에서 선생님을 등록해주세요.")
+      : `${scheduleTeacherTabs}${timetableGridHtml(gridEntries, gridChildren, activeColor)}`}
 
     <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">시간표 관리</h2>
     <div class="card" style="padding:16px;margin-bottom:14px;">
@@ -1004,7 +1041,7 @@ function notesPanelHtml() {
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
           <span style="font-weight:700;font-size:13.5px;">${child ? esc(child.name) : "(삭제된 아동)"}</span>
-          <span style="font-size:11.5px;color:var(--ink-soft);">· ${teacher ? `${esc(teacher.name)} 선생님` : "알 수 없음"}</span>
+          ${teacher ? teacherBadgeHtml(teacher) : `<span style="font-size:11.5px;color:var(--ink-soft);">알 수 없음</span>`}
           <span style="font-size:11px;color:var(--ink-soft);margin-left:auto;">${new Date(n.createdAt).toLocaleString("ko-KR",{month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
         </div>
         <div style="font-size:13.5px;white-space:pre-wrap;">${esc(n.content)}</div>
@@ -1026,7 +1063,7 @@ function paymentsPanelHtml() {
   const rows = DATA.children.map(c => {
     const info = computePaymentInfo(c, DATA.cancellations);
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
-    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, teacherName: teacher ? teacher.name : "미배정" };
+    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, teacher };
   }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
 
   const rowsHtml = rows.map(c => `
@@ -1034,7 +1071,10 @@ function paymentsPanelHtml() {
       ${avatarHtml(c.name, c.id, 38)}
       <div style="flex:1;">
         <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
-        <div style="font-size:12px;color:var(--ink-soft);">${esc(c.teacherName)} 선생님 · ${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${teacherBadgeHtml(c.teacher)}
+          <span>${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</span>
+        </div>
       </div>
       ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>` : ""}
     </div>`).join("");
