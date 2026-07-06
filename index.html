@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>방문수업 플래너</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    --paper: #F1F4EE;
+    --paper-2: #E8ECE3;
+    --ink: #263430;
+    --ink-soft: #5B6B62;
+    --moss: #4F7358;
+    --moss-dark: #3C5A45;
+    --amber: #D9A441;
+    --rose: #C15C6E;
+    --slate: #6B7D8C;
+    --line: #D9DED2;
+    --card: #FCFBF7;
+    font-family: 'Noto Sans KR', sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    min-height: 100vh;
+  }
+  .display { font-family: 'Noto Serif KR', serif; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border-radius: 10px; font-weight: 600; transition: transform .12s ease, background .15s ease;
+    cursor: pointer; border: 1px solid transparent; white-space: nowrap; font-family: inherit; font-size: 14px;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--moss); color: #fff; }
+  .btn-primary:hover { background: var(--moss-dark); }
+  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .btn-ghost { background: transparent; color: var(--ink-soft); border-color: var(--line); }
+  .btn-ghost:hover { background: var(--paper-2); }
+  .btn-danger { background: transparent; color: var(--rose); }
+  .btn-danger:hover { background: #F5E1E4; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px rgba(38,52,48,0.04); }
+  .input, .select, .textarea {
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px;
+    background: #fff; color: var(--ink); font-family: inherit; font-size: 14px; outline: none;
+  }
+  .input:focus, .select:focus, .textarea:focus { border-color: var(--moss); }
+  .tab {
+    display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 999px;
+    font-weight: 600; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; white-space: nowrap;
+    border: 1px solid transparent; background: transparent;
+  }
+  .tab.active { background: var(--moss); color: #fff; }
+  .tab:not(.active):hover { background: var(--paper-2); }
+  .planner-th { border-radius: 10px 10px 0 0; padding: 8px 4px; text-align: center; font-weight: 700; font-size: 13px; }
+  .scrollbar::-webkit-scrollbar { height: 8px; width: 8px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  .dotbg { background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; }
+  .fadein { animation: fade .18s ease; }
+  @keyframes fade { from { opacity:0; transform: translateY(4px);} to { opacity:1; transform:none; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .icon { flex-shrink: 0; }
+  .avatar {
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; flex-shrink: 0;
+  }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(38,52,48,0.45); display: flex;
+    align-items: center; justify-content: center; z-index: 50; padding: 16px;
+  }
+  .empty { padding: 40px 20px; text-align: center; }
+  .empty-icon { display: inline-flex; padding: 14px; border-radius: 50%; background: var(--paper-2); margin-bottom: 12px; }
+  .hidden { display: none !important; }
+  table { border-collapse: separate; border-spacing: 6px; min-width: 640px; }
+  #app { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/*  아이콘 (lucide 스타일 인라인 SVG 문자열)                              */
+/* ------------------------------------------------------------------ */
+function icon(name, size = 20, color) {
+  const c = color || 'currentColor';
+  const paths = {
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    baby: '<path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M10 16c.5.3 1.2.5 2 .5s1.5-.2 2-.5"/><path d="M19 6.3a9 9 0 0 1 1.8 3.9 2 2 0 0 1 0 3.6 9 9 0 0 1-17.6 0 2 2 0 0 1 0-3.6A9 9 0 0 1 12 3c2 0 3.5 1.1 3.5 2.5s-.9 2.5-2 2.5c-.5 0-1-.4-1-1"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    note: '<path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z"/><path d="M15 3v6h6"/>',
+    wallet: '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    chevron: '<path d="m9 18 6-6-6-6"/>',
+    x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+    pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  };
+  return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ''}</svg>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  상수 & 유틸                                                        */
+/* ------------------------------------------------------------------ */
+const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
+const STORAGE_KEY = "visit_teacher_app_data_v1";
+const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], adminPin: "1234" };
+
+function uid(prefix = "id") {
+  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+const CHILD_PALETTE = [
+  { bg: "#E7EFE4", text: "#3F5B41" },
+  { bg: "#F6EAD9", text: "#8A5A22" },
+  { bg: "#F5E1E4", text: "#8C3B4C" },
+  { bg: "#E3E9EE", text: "#3C5066" },
+  { bg: "#EAE6F2", text: "#5A4A7A" },
+  { bg: "#DDEEF0", text: "#2E6670" },
+];
+function colorForChild(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return CHILD_PALETTE[hash % CHILD_PALETTE.length];
+}
+function getNextPaymentDate(payDay) {
+  const now = new Date();
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let d = new Date(now.getFullYear(), now.getMonth(), payDay);
+  if (d < today0) d = new Date(now.getFullYear(), now.getMonth() + 1, payDay);
+  return d;
+}
+function daysUntil(date) {
+  const today0 = new Date(); today0.setHours(0,0,0,0);
+  const d0 = new Date(date); d0.setHours(0,0,0,0);
+  return Math.round((d0 - today0) / 86400000);
+}
+function formatDate(d) { return `${d.getMonth() + 1}월 ${d.getDate()}일`; }
+function dDayLabel(dleft) {
+  if (dleft === 0) return "오늘";
+  if (dleft > 0) return `D-${dleft}`;
+  return `${Math.abs(dleft)}일 지남`;
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function avatarHtml(name, colorId, size = 36) {
+  const c = colorForChild(colorId || name || "x");
+  return `<div class="avatar" style="width:${size}px;height:${size}px;background:${c.bg};color:${c.text};font-size:${size*0.4}px;">${esc(name ? name[0] : "?")}</div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  전역 상태                                                          */
+/* ------------------------------------------------------------------ */
+let DATA = null;
+let CURRENT_USER = null; // { role: 'admin' } | { role: 'teacher', id, name }
+let ADMIN_TAB = "teachers";
+let TEACHER_TAB = "timetable";
+let NOTE_CHILD_ID = null;
+let NOTE_TEXT = "";
+let PENDING_DELETE = null; // { type, id }
+let SHOW_PIN_MODAL = false;
+let PIN_INPUT = "";
+let PIN_ERROR = "";
+let SHOW_PAYMENT_POPUP = false;
+let SHOW_SETTINGS = false;
+let CHILD_FORM = { name: "", age: "", paymentDay: 15, teacherId: "" };
+let SCHEDULE_FORM = { childId: "", day: "월", time: "10:00" };
+let NOTES_FILTER_TEACHER = "";
+let PIN_SAVE_MSG = false;
+
+function persist() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); } catch (e) { console.error("저장 실패", e); }
+  render();
+}
+
+/* ------------------------------------------------------------------ */
+/*  렌더 루트                                                          */
+/* ------------------------------------------------------------------ */
+function render() {
+  const app = document.getElementById("app");
+  if (!DATA) {
+    app.innerHTML = `
+      <div class="dotbg" style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="text-align:center;color:var(--ink-soft);">
+          <div style="animation:spin 1s linear infinite;display:inline-block;">${icon('loader', 22)}</div>
+          <div style="margin-top:8px;font-size:13.5px;">불러오는 중이에요...</div>
+        </div>
+      </div>`;
+    return;
+  }
+  if (!CURRENT_USER) { app.innerHTML = loginScreenHtml(); attachLoginEvents(); return; }
+  if (CURRENT_USER.role === "admin") { app.innerHTML = adminAppHtml(); attachAdminEvents(); return; }
+  app.innerHTML = teacherAppHtml(); attachTeacherEvents();
+}
+
+/* ------------------------------------------------------------------ */
+/*  로그인 화면                                                         */
+/* ------------------------------------------------------------------ */
+function loginScreenHtml() {
+  const teachersHtml = DATA.teachers.length === 0
+    ? `<div style="text-align:center;padding:18px 6px;">
+        <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:14px;">아직 등록된 선생님이 없어요.<br/>팀장님이 먼저 로그인해서 선생님을 등록해주세요.</p>
+      </div>`
+    : `<div style="display:grid;gap:8px;">
+        ${DATA.teachers.map(t => `
+          <button class="btn btn-ghost teacher-login-btn" data-id="${t.id}" style="justify-content:flex-start;padding:12px 14px;font-size:14.5px;">
+            ${avatarHtml(t.name, t.id, 30)}
+            <span style="margin-left:4px;">${esc(t.name)} 선생님</span>
+            <span style="margin-left:auto;">${icon('chevron', 16)}</span>
+          </button>`).join("")}
+      </div>`;
+
+  const pinModal = SHOW_PIN_MODAL ? `
+    <div class="modal-overlay" id="pin-overlay">
+      <div class="card fadein" style="width:100%;max-width:340px;padding:22px;">
+        <div style="text-align:center;margin-bottom:14px;">
+          ${icon('shield', 26, 'var(--moss)')}
+          <h2 style="font-size:17px;font-weight:700;margin:8px 0 2px;">팀장 로그인</h2>
+          <p style="font-size:12.5px;color:var(--ink-soft);">PIN 번호를 입력해주세요</p>
+        </div>
+        <input id="pin-input" class="input" style="width:100%;text-align:center;letter-spacing:4px;font-size:18px;margin-bottom:8px;"
+          type="password" inputmode="numeric" maxlength="8" value="${esc(PIN_INPUT)}" placeholder="••••" autofocus />
+        ${PIN_ERROR ? `<div style="color:var(--rose);font-size:12.5px;margin-bottom:8px;display:flex;gap:4px;align-items:center;">${icon('alert',13)} ${esc(PIN_ERROR)}</div>` : ""}
+        <button id="pin-submit" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:6px;">로그인</button>
+        <p style="font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:10px;">기본 PIN은 1234예요. 로그인 후 설정에서 바꿀 수 있어요.</p>
+      </div>
+    </div>` : "";
+
+  return `
+    <div class="dotbg" style="display:flex;align-items:center;justify-content:center;padding:20px;min-height:100vh;">
+      <div style="width:100%;max-width:440px;">
+        <div style="text-align:center;margin-bottom:28px;">
+          <div style="display:inline-flex;padding:14px;border-radius:18px;background:var(--moss);margin-bottom:14px;">${icon('baby',28,'#fff')}</div>
+          <h1 class="display" style="font-size:26px;font-weight:700;margin:0;">방문수업 플래너</h1>
+          <p style="color:var(--ink-soft);font-size:14px;margin-top:6px;">선생님 이름을 선택해서 들어가세요</p>
+        </div>
+        <div class="card" style="padding:18px;">${teachersHtml}</div>
+        <div style="text-align:center;margin-top:18px;">
+          <button id="admin-login-open" class="btn btn-ghost" style="padding:8px 16px;font-size:13px;color:var(--slate);">${icon('lock',13)} 팀장으로 로그인</button>
+        </div>
+      </div>
+    </div>
+    ${pinModal}`;
+}
+
+function attachLoginEvents() {
+  document.querySelectorAll(".teacher-login-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = DATA.teachers.find(x => x.id === btn.dataset.id);
+      if (t) { CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable"; render(); }
+    });
+  });
+  const openBtn = document.getElementById("admin-login-open");
+  if (openBtn) openBtn.addEventListener("click", () => { SHOW_PIN_MODAL = true; PIN_INPUT = ""; PIN_ERROR = ""; render(); });
+
+  const overlay = document.getElementById("pin-overlay");
+  if (overlay) {
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) { SHOW_PIN_MODAL = false; render(); } });
+    const input = document.getElementById("pin-input");
+    input.focus();
+    input.addEventListener("input", (e) => { PIN_INPUT = e.target.value; PIN_ERROR = ""; });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitPin(); });
+    document.getElementById("pin-submit").addEventListener("click", submitPin);
+  }
+}
+function submitPin() {
+  if (PIN_INPUT === DATA.adminPin) {
+    SHOW_PIN_MODAL = false; PIN_INPUT = ""; PIN_ERROR = "";
+    CURRENT_USER = { role: "admin" }; ADMIN_TAB = "teachers";
+    render();
+  } else {
+    PIN_ERROR = "PIN 번호가 올바르지 않아요.";
+    render();
+    setTimeout(() => { const el = document.getElementById("pin-input"); if (el) el.focus(); }, 0);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  상단 바                                                             */
+/* ------------------------------------------------------------------ */
+function topBarHtml(roleLabel, subLabel, tabs, activeTab, tabAttr, extraHtml) {
+  return `
+    <div style="position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--line);">
+      <div style="max-width:920px;margin:0 auto;padding:14px 16px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="padding:8px;border-radius:10px;background:var(--moss);">${icon('baby',16,'#fff')}</div>
+            <div>
+              <div class="display" style="font-size:15px;font-weight:700;line-height:1.2;">${esc(roleLabel)}</div>
+              <div style="font-size:11.5px;color:var(--ink-soft);">${esc(subLabel)}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            ${extraHtml || ""}
+            <button id="logout-btn" class="btn btn-ghost" style="padding:8px 12px;font-size:12.5px;">${icon('logout',13)} 나가기</button>
+          </div>
+        </div>
+        <div class="scrollbar" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:12px;">
+          ${tabs.map(t => `<div class="tab ${t.key === activeTab ? "active" : ""}" data-${tabAttr}="${t.key}">${icon(t.icon,14)} ${esc(t.label)}</div>`).join("")}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  시간표 그리드                                                       */
+/* ------------------------------------------------------------------ */
+function timetableGridHtml(entries, children) {
+  if (entries.length === 0) {
+    return emptyStateHtml('calendar', "등록된 시간표가 없어요", "팀장님께 시간표 등록을 요청해보세요.");
+  }
+  const times = Array.from(new Set(entries.map(e => e.time))).sort();
+  const childMap = {}; children.forEach(c => childMap[c.id] = c);
+
+  return `
+    <div class="card scrollbar" style="overflow-x:auto;padding:14px;">
+      <table>
+        <thead><tr><th style="width:56px;"></th>
+          ${DAYS.map(d => `<th class="planner-th" style="background:var(--paper-2);color:var(--ink);">${d}</th>`).join("")}
+        </tr></thead>
+        <tbody>
+          ${times.map(time => `
+            <tr>
+              <td style="font-size:12px;color:var(--ink-soft);font-weight:700;text-align:center;white-space:nowrap;">${esc(time)}</td>
+              ${DAYS.map(day => {
+                const cell = entries.filter(e => e.day === day && e.time === time);
+                return `<td style="min-width:96px;vertical-align:top;"><div style="display:grid;gap:4px;">
+                  ${cell.map(e => {
+                    const child = childMap[e.childId];
+                    if (!child) return "";
+                    const c = colorForChild(child.id);
+                    return `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:6px 8px;font-size:12.5px;font-weight:700;text-align:center;">${esc(child.name)}</div>`;
+                  }).join("")}
+                </div></td>`;
+              }).join("")}
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function emptyStateHtml(iconName, title, desc) {
+  return `
+    <div class="card empty">
+      <div class="empty-icon">${icon(iconName, 22, 'var(--ink-soft)')}</div>
+      <div style="font-weight:700;margin-bottom:4px;">${esc(title)}</div>
+      ${desc ? `<div style="font-size:13.5px;color:var(--ink-soft);">${esc(desc)}</div>` : ""}
+    </div>`;
+}
+
+function confirmInlineHtml(type, id, text = "삭제할까요?") {
+  return `
+    <div class="fadein" style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:13px;color:var(--rose);font-weight:600;">${esc(text)}</span>
+      <button class="btn btn-danger confirm-yes" data-type="${type}" data-id="${id}" style="padding:5px 10px;font-size:12.5px;">삭제</button>
+      <button class="btn btn-ghost confirm-no" style="padding:5px 10px;font-size:12.5px;">취소</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  교사 화면                                                           */
+/* ------------------------------------------------------------------ */
+function teacherAppHtml() {
+  const me = CURRENT_USER;
+  const myChildren = DATA.children.filter(c => c.teacherId === me.id);
+  const myChildIds = new Set(myChildren.map(c => c.id));
+  const mySchedule = DATA.schedule.filter(s => myChildIds.has(s.childId));
+  const paymentList = myChildren.map(c => {
+    const nextDate = getNextPaymentDate(c.paymentDay);
+    return { ...c, nextDate, dleft: daysUntil(nextDate) };
+  }).sort((a,b) => a.dleft - b.dleft);
+  const duePayments = paymentList.filter(c => c.dleft <= 3);
+
+  if (!NOTE_CHILD_ID && myChildren.length > 0) NOTE_CHILD_ID = myChildren[0].id;
+
+  const tabs = [
+    { key: "timetable", label: "내 시간표", icon: "calendar" },
+    { key: "children", label: "내 아동", icon: "users" },
+    { key: "notes", label: "특이사항", icon: "note" },
+    { key: "payments", label: "결제일", icon: "wallet" },
+  ];
+
+  let body = "";
+  if (TEACHER_TAB === "timetable") {
+    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">이번 주 시간표</h2>${timetableGridHtml(mySchedule, myChildren)}`;
+  } else if (TEACHER_TAB === "children") {
+    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">내 아동 목록</h2>`;
+    if (myChildren.length === 0) {
+      body += emptyStateHtml('users', "아직 배정된 아동이 없어요", "팀장님이 담당 아동을 배정하면 여기에 표시돼요.");
+    } else {
+      body += `<div style="display:grid;gap:8px;">${myChildren.map(c => `
+        <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
+          ${avatarHtml(c.name, c.id, 40)}
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 · 결제일 매월 ${c.paymentDay}일</div>
+          </div>
+          <button class="btn btn-ghost go-note-btn" data-id="${c.id}" style="padding:7px 10px;font-size:12px;">${icon('pencil',13)} 특이사항</button>
+        </div>`).join("")}</div>`;
+    }
+  } else if (TEACHER_TAB === "notes") {
+    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">특이사항 작성</h2>`;
+    if (myChildren.length === 0) {
+      body += emptyStateHtml('note', "배정된 아동이 없어요", "아동이 배정되면 특이사항을 작성할 수 있어요.");
+    } else {
+      const childNotes = DATA.notes.filter(n => n.childId === NOTE_CHILD_ID).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+      body += `
+        <div class="card" style="padding:16px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            ${myChildren.map(c => `<button class="tab note-child-tab ${NOTE_CHILD_ID === c.id ? "active" : ""}" data-id="${c.id}">${esc(c.name)}</button>`).join("")}
+          </div>
+          <textarea id="note-text" class="textarea" style="width:100%;min-height:90px;resize:vertical;"
+            placeholder="예) 오늘 낯가림이 조금 있었어요. 큰 소리에 놀라는 편이라 목소리 톤 조절이 필요해요.">${esc(NOTE_TEXT)}</textarea>
+          <button id="add-note-btn" class="btn btn-primary" style="padding:9px 16px;margin-top:10px;" ${!NOTE_TEXT.trim() ? "disabled" : ""}>${icon('plus',14)} 기록 추가</button>
+          <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
+            <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:8px;">지난 기록</div>
+            ${childNotes.length === 0
+              ? `<div style="font-size:13px;color:var(--ink-soft);">아직 작성된 기록이 없어요.</div>`
+              : `<div style="display:grid;gap:8px;">${childNotes.map(n => `
+                  <div style="background:var(--paper-2);border-radius:10px;padding:10px 12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;">
+                      <div style="font-size:13.5px;white-space:pre-wrap;">${esc(n.content)}</div>
+                      <div class="note-actions" data-id="${n.id}">
+                        ${PENDING_DELETE && PENDING_DELETE.type === "note" && PENDING_DELETE.id === n.id
+                          ? confirmInlineHtml("note", n.id)
+                          : `<button class="btn btn-ghost del-note-btn" data-id="${n.id}" style="padding:4px;flex-shrink:0;">${icon('trash',13)}</button>`}
+                      </div>
+                    </div>
+                    <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;">${new Date(n.createdAt).toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                  </div>`).join("")}</div>`}
+          </div>
+        </div>`;
+    }
+  } else if (TEACHER_TAB === "payments") {
+    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제일 현황</h2>`;
+    if (paymentList.length === 0) {
+      body += emptyStateHtml('wallet', "배정된 아동이 없어요");
+    } else {
+      body += `<div style="display:grid;gap:8px;">${paymentList.map(c => `
+        <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
+          ${avatarHtml(c.name, c.id, 38)}
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);">다음 결제일 ${formatDate(c.nextDate)}</div>
+          </div>
+          <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+        </div>`).join("")}</div>`;
+    }
+  }
+
+  const popup = SHOW_PAYMENT_POPUP && duePayments.length > 0 ? `
+    <div class="modal-overlay" id="payment-overlay">
+      <div class="card fadein" style="width:100%;max-width:400px;padding:22px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div style="padding:8px;border-radius:10px;background:#F6EAD9;">${icon('wallet',18,'var(--amber)')}</div>
+          <h2 style="font-size:16.5px;font-weight:700;margin:0;">결제일 알림</h2>
+        </div>
+        <p style="font-size:13px;color:var(--ink-soft);margin:6px 0 14px;">곧 결제일인 아동이 있어요.</p>
+        <div style="display:grid;gap:8px;">
+          ${duePayments.map(c => `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:${c.dleft===0?"#F6EAD9":"var(--paper-2)"};">
+              ${avatarHtml(c.name, c.id, 32)}
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:14px;">${esc(c.name)}</div>
+                <div style="font-size:11.5px;color:var(--ink-soft);">${formatDate(c.nextDate)} 결제 예정</div>
+              </div>
+              <div style="font-weight:700;font-size:13px;color:${c.dleft===0?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+            </div>`).join("")}
+        </div>
+        <button id="close-payment-popup" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:16px;">확인했어요</button>
+      </div>
+    </div>` : "";
+
+  return `
+    ${topBarHtml(`${me.name} 선생님`, `담당 아동 ${myChildren.length}명`, tabs, TEACHER_TAB, "tteacher")}
+    <div style="max-width:920px;margin:0 auto;padding:18px 16px 60px;">${body}</div>
+    ${popup}`;
+}
+
+function attachTeacherEvents() {
+  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; render(); });
+  document.querySelectorAll("[data-tteacher]").forEach(el => el.addEventListener("click", () => { TEACHER_TAB = el.dataset.tteacher; render(); }));
+  document.querySelectorAll(".go-note-btn").forEach(el => el.addEventListener("click", () => { TEACHER_TAB = "notes"; NOTE_CHILD_ID = el.dataset.id; render(); }));
+  document.querySelectorAll(".note-child-tab").forEach(el => el.addEventListener("click", () => { NOTE_CHILD_ID = el.dataset.id; NOTE_TEXT = ""; render(); }));
+
+  const noteText = document.getElementById("note-text");
+  if (noteText) {
+    noteText.addEventListener("input", (e) => {
+      NOTE_TEXT = e.target.value;
+      const btn = document.getElementById("add-note-btn");
+      if (btn) btn.disabled = !NOTE_TEXT.trim();
+    });
+  }
+  const addNoteBtn = document.getElementById("add-note-btn");
+  if (addNoteBtn) addNoteBtn.addEventListener("click", () => {
+    if (!NOTE_CHILD_ID || !NOTE_TEXT.trim()) return;
+    DATA.notes = [{ id: uid("note"), childId: NOTE_CHILD_ID, teacherId: CURRENT_USER.id, content: NOTE_TEXT.trim(), createdAt: new Date().toISOString() }, ...DATA.notes];
+    NOTE_TEXT = "";
+    persist();
+  });
+  document.querySelectorAll(".del-note-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "note", id: el.dataset.id }; render(); }));
+  document.querySelectorAll(".confirm-yes").forEach(el => el.addEventListener("click", () => {
+    if (el.dataset.type === "note") { DATA.notes = DATA.notes.filter(n => n.id !== el.dataset.id); PENDING_DELETE = null; persist(); }
+  }));
+  document.querySelectorAll(".confirm-no").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = null; render(); }));
+
+  const popupOverlay = document.getElementById("payment-overlay");
+  if (popupOverlay) {
+    popupOverlay.addEventListener("mousedown", (e) => { if (e.target === popupOverlay) { SHOW_PAYMENT_POPUP = false; render(); } });
+    document.getElementById("close-payment-popup").addEventListener("click", () => { SHOW_PAYMENT_POPUP = false; render(); });
+  }
+
+  // 결제 임박 팝업: 로그인 직후 1회 표시
+  if (!teacherAppHtml.__shownFor || teacherAppHtml.__shownFor !== CURRENT_USER.id) {
+    teacherAppHtml.__shownFor = CURRENT_USER.id;
+    const myChildren = DATA.children.filter(c => c.teacherId === CURRENT_USER.id);
+    const due = myChildren.map(c => ({ ...c, dleft: daysUntil(getNextPaymentDate(c.paymentDay)) })).filter(c => c.dleft <= 3);
+    if (due.length > 0 && !SHOW_PAYMENT_POPUP) { SHOW_PAYMENT_POPUP = true; render(); }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  팀장(관리자) 화면                                                    */
+/* ------------------------------------------------------------------ */
+function adminAppHtml() {
+  const tabs = [
+    { key: "teachers", label: "교사 관리", icon: "users" },
+    { key: "children", label: "아동 관리", icon: "baby" },
+    { key: "schedule", label: "시간표", icon: "calendar" },
+    { key: "notes", label: "특이사항", icon: "note" },
+    { key: "payments", label: "결제 현황", icon: "wallet" },
+  ];
+  let body = "";
+  if (ADMIN_TAB === "teachers") body = teachersPanelHtml();
+  else if (ADMIN_TAB === "children") body = childrenPanelHtml();
+  else if (ADMIN_TAB === "schedule") body = schedulePanelHtml();
+  else if (ADMIN_TAB === "notes") body = notesPanelHtml();
+  else if (ADMIN_TAB === "payments") body = paymentsPanelHtml();
+
+  const extra = `<button id="settings-open" class="btn btn-ghost" style="padding:8px 10px;">${icon('settings',14)}</button>`;
+  const settingsModal = SHOW_SETTINGS ? `
+    <div class="modal-overlay" id="settings-overlay">
+      <div class="card fadein" style="width:100%;max-width:360px;padding:22px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <h2 style="font-size:16px;font-weight:700;margin:0;">설정</h2>
+          <button id="settings-close" class="btn btn-ghost" style="padding:6px;">${icon('x',16)}</button>
+        </div>
+        <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);">팀장 PIN 변경</label>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <input id="new-pin-input" class="input" style="flex:1;" placeholder="새 PIN (4자리 이상)" inputmode="numeric" />
+          <button id="save-pin-btn" class="btn btn-primary" style="padding:0 14px;">저장</button>
+        </div>
+        ${PIN_SAVE_MSG ? `<div style="color:var(--moss);font-size:12.5px;margin-top:8px;display:flex;gap:4px;align-items:center;">${icon('check',13)} 변경되었어요</div>` : ""}
+      </div>
+    </div>` : "";
+
+  return `
+    ${topBarHtml("팀장 대시보드", `선생님 ${DATA.teachers.length}명 · 아동 ${DATA.children.length}명`, tabs, ADMIN_TAB, "tadmin", extra)}
+    <div style="max-width:920px;margin:0 auto;padding:18px 16px 60px;">${body}</div>
+    ${settingsModal}`;
+}
+
+function teachersPanelHtml() {
+  const rows = DATA.teachers.map(t => {
+    const count = DATA.children.filter(c => c.teacherId === t.id).length;
+    return `
+      <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
+        ${avatarHtml(t.name, t.id, 38)}
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:14.5px;">${esc(t.name)} 선생님</div>
+          <div style="font-size:12px;color:var(--ink-soft);">담당 아동 ${count}명</div>
+        </div>
+        ${PENDING_DELETE && PENDING_DELETE.type === "teacher" && PENDING_DELETE.id === t.id
+          ? confirmInlineHtml("teacher", t.id)
+          : `<button class="btn btn-danger del-teacher-btn" data-id="${t.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
+      </div>`;
+  }).join("");
+
+  return `
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">교사 관리</h2>
+    <div class="card" style="padding:16px;margin-bottom:14px;">
+      <div style="display:flex;gap:8px;">
+        <input id="teacher-name-input" class="input" style="flex:1;" placeholder="선생님 이름" />
+        <button id="add-teacher-btn" class="btn btn-primary" style="padding:0 14px;">${icon('plus',14)} 추가</button>
+      </div>
+    </div>
+    ${DATA.teachers.length === 0 ? emptyStateHtml('users', "등록된 선생님이 없어요", "이름을 입력해서 첫 선생님을 등록해보세요.") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
+}
+
+function childrenPanelHtml() {
+  const options = (selected) => `<option value="">담당 교사 미배정</option>` + DATA.teachers.map(t => `<option value="${t.id}" ${selected===t.id?"selected":""}>${esc(t.name)} 선생님</option>`).join("");
+  const dayOptions = (selected) => Array.from({length:31},(_,i)=>i+1).map(d => `<option value="${d}" ${Number(selected)===d?"selected":""}>매월 ${d}일 결제</option>`).join("");
+
+  const rows = DATA.children.map(c => {
+    const teacher = DATA.teachers.find(t => t.id === c.teacherId);
+    return `
+      <div class="card" style="padding:14px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+          ${avatarHtml(c.name, c.id, 38)}
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세</div>
+          </div>
+          ${PENDING_DELETE && PENDING_DELETE.type === "child" && PENDING_DELETE.id === c.id
+            ? confirmInlineHtml("child", c.id)
+            : `<button class="btn btn-danger del-child-btn" data-id="${c.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <select class="select child-payday-select" data-id="${c.id}" style="font-size:12.5px;">${dayOptions(c.paymentDay)}</select>
+          <select class="select child-teacher-select" data-id="${c.id}" style="font-size:12.5px;">${options(c.teacherId)}</select>
+          ${!teacher ? `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>` : ""}
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">아동 관리</h2>
+    <div class="card" style="padding:16px;margin-bottom:14px;">
+      <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;">새 아동 등록</div>
+      <div style="display:grid;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="new-child-name" class="input" style="flex:2;min-width:120px;" placeholder="이름" value="${esc(CHILD_FORM.name)}" />
+          <input id="new-child-age" class="input" style="flex:1;min-width:80px;" placeholder="나이" type="number" min="0" value="${esc(CHILD_FORM.age)}" />
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <select id="new-child-payday" class="select" style="flex:1;min-width:140px;">${dayOptions(CHILD_FORM.paymentDay)}</select>
+          <select id="new-child-teacher" class="select" style="flex:1;min-width:140px;">${options(CHILD_FORM.teacherId)}</select>
+        </div>
+        <button id="add-child-btn" class="btn btn-primary" style="padding:9px 0;">${icon('plus',14)} 아동 등록</button>
+      </div>
+    </div>
+    ${DATA.children.length === 0 ? emptyStateHtml('baby', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
+}
+
+function schedulePanelHtml() {
+  const childOptions = `<option value="">아동 선택</option>` + DATA.children.map(c => {
+    const t = DATA.teachers.find(tt => tt.id === c.teacherId);
+    return `<option value="${c.id}" ${SCHEDULE_FORM.childId===c.id?"selected":""}>${esc(c.name)} ${t?`(${esc(t.name)})`:"(미배정)"}</option>`;
+  }).join("");
+  const dayOptions = DAYS.map(d => `<option value="${d}" ${SCHEDULE_FORM.day===d?"selected":""}>${d}요일</option>`).join("");
+
+  const sorted = [...DATA.schedule].sort((a,b) => DAYS.indexOf(a.day)-DAYS.indexOf(b.day) || a.time.localeCompare(b.time));
+  const rows = sorted.map(s => {
+    const child = DATA.children.find(c => c.id === s.childId);
+    const teacher = child ? DATA.teachers.find(t => t.id === child.teacherId) : null;
+    return `
+      <div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:10px;">
+        <div style="font-weight:700;font-size:13px;width:40px;">${s.day}</div>
+        <div style="font-size:13px;color:var(--ink-soft);width:56px;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}</div>
+        <div style="flex:1;font-size:13.5px;font-weight:600;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
+        <div style="font-size:12px;color:var(--ink-soft);">${teacher ? `${esc(teacher.name)} 선생님` : "미배정"}</div>
+        ${PENDING_DELETE && PENDING_DELETE.type === "schedule" && PENDING_DELETE.id === s.id
+          ? confirmInlineHtml("schedule", s.id)
+          : `<button class="btn btn-ghost del-schedule-btn" data-id="${s.id}" style="padding:6px;">${icon('trash',13)}</button>`}
+      </div>`;
+  }).join("");
+
+  return `
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">시간표 관리</h2>
+    <div class="card" style="padding:16px;margin-bottom:14px;">
+      <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;">새 수업 등록</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <select id="sched-child" class="select" style="flex:2;min-width:140px;">${childOptions}</select>
+        <select id="sched-day" class="select" style="min-width:80px;">${dayOptions}</select>
+        <input id="sched-time" class="input" style="min-width:100px;" type="time" value="${SCHEDULE_FORM.time}" />
+        <button id="add-schedule-btn" class="btn btn-primary" style="padding:0 14px;">${icon('plus',14)} 추가</button>
+      </div>
+    </div>
+    ${sorted.length === 0 ? emptyStateHtml('calendar', "등록된 시간표가 없어요") : `<div style="display:grid;gap:6px;">${rows}</div>`}`;
+}
+
+function notesPanelHtml() {
+  const sorted = [...DATA.notes].filter(n => !NOTES_FILTER_TEACHER || n.teacherId === NOTES_FILTER_TEACHER)
+    .sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const rows = sorted.map(n => {
+    const child = DATA.children.find(c => c.id === n.childId);
+    const teacher = DATA.teachers.find(t => t.id === n.teacherId);
+    return `
+      <div class="card" style="padding:14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-weight:700;font-size:13.5px;">${child ? esc(child.name) : "(삭제된 아동)"}</span>
+          <span style="font-size:11.5px;color:var(--ink-soft);">· ${teacher ? `${esc(teacher.name)} 선생님` : "알 수 없음"}</span>
+          <span style="font-size:11px;color:var(--ink-soft);margin-left:auto;">${new Date(n.createdAt).toLocaleString("ko-KR",{month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
+        </div>
+        <div style="font-size:13.5px;white-space:pre-wrap;">${esc(n.content)}</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+      <h2 style="font-size:15px;font-weight:700;margin:0;">전체 특이사항</h2>
+      <select id="notes-filter" class="select" style="font-size:12.5px;">
+        <option value="">전체 선생님</option>
+        ${DATA.teachers.map(t => `<option value="${t.id}" ${NOTES_FILTER_TEACHER===t.id?"selected":""}>${esc(t.name)} 선생님</option>`).join("")}
+      </select>
+    </div>
+    ${sorted.length === 0 ? emptyStateHtml('note', "작성된 특이사항이 없어요") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
+}
+
+function paymentsPanelHtml() {
+  const rows = DATA.children.map(c => {
+    const nextDate = getNextPaymentDate(c.paymentDay);
+    const dleft = daysUntil(nextDate);
+    const teacher = DATA.teachers.find(t => t.id === c.teacherId);
+    return { ...c, nextDate, dleft, teacherName: teacher ? teacher.name : "미배정" };
+  }).sort((a,b) => a.dleft - b.dleft);
+
+  const rowsHtml = rows.map(c => `
+    <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
+      ${avatarHtml(c.name, c.id, 38)}
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);">${esc(c.teacherName)} 선생님 · 다음 결제일 ${formatDate(c.nextDate)}</div>
+      </div>
+      <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+    </div>`).join("");
+
+  return `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rowsHtml}</div>`}`;
+}
+
+function attachAdminEvents() {
+  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; render(); });
+  document.querySelectorAll("[data-tadmin]").forEach(el => el.addEventListener("click", () => { ADMIN_TAB = el.dataset.tadmin; render(); }));
+
+  const settingsOpen = document.getElementById("settings-open");
+  if (settingsOpen) settingsOpen.addEventListener("click", () => { SHOW_SETTINGS = true; PIN_SAVE_MSG = false; render(); });
+  const settingsOverlay = document.getElementById("settings-overlay");
+  if (settingsOverlay) {
+    settingsOverlay.addEventListener("mousedown", (e) => { if (e.target === settingsOverlay) { SHOW_SETTINGS = false; render(); } });
+    document.getElementById("settings-close").addEventListener("click", () => { SHOW_SETTINGS = false; render(); });
+    document.getElementById("save-pin-btn").addEventListener("click", () => {
+      const val = document.getElementById("new-pin-input").value.trim();
+      if (val.length < 4) return;
+      DATA.adminPin = val;
+      PIN_SAVE_MSG = true;
+      persist();
+      setTimeout(() => { PIN_SAVE_MSG = false; render(); }, 1500);
+    });
+  }
+
+  // 교사 관리
+  const addTeacherBtn = document.getElementById("add-teacher-btn");
+  if (addTeacherBtn) {
+    const nameInput = document.getElementById("teacher-name-input");
+    const addTeacher = () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      DATA.teachers = [...DATA.teachers, { id: uid("t"), name }];
+      persist();
+    };
+    addTeacherBtn.addEventListener("click", addTeacher);
+    nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addTeacher(); });
+  }
+  document.querySelectorAll(".del-teacher-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "teacher", id: el.dataset.id }; render(); }));
+
+  // 아동 관리
+  const addChildBtn = document.getElementById("add-child-btn");
+  if (addChildBtn) {
+    addChildBtn.addEventListener("click", () => {
+      const name = document.getElementById("new-child-name").value.trim();
+      const age = document.getElementById("new-child-age").value;
+      const paymentDay = document.getElementById("new-child-payday").value;
+      const teacherId = document.getElementById("new-child-teacher").value;
+      if (!name || !age) return;
+      DATA.children = [...DATA.children, { id: uid("c"), name, age: Number(age), paymentDay: Number(paymentDay), teacherId: teacherId || null }];
+      CHILD_FORM = { name: "", age: "", paymentDay: 15, teacherId: "" };
+      persist();
+    });
+  }
+  document.querySelectorAll(".child-payday-select").forEach(el => el.addEventListener("change", () => {
+    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, paymentDay: Number(el.value) } : c);
+    persist();
+  }));
+  document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventListener("change", () => {
+    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, teacherId: el.value || null } : c);
+    persist();
+  }));
+  document.querySelectorAll(".del-child-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "child", id: el.dataset.id }; render(); }));
+
+  // 시간표
+  const addScheduleBtn = document.getElementById("add-schedule-btn");
+  if (addScheduleBtn) {
+    addScheduleBtn.addEventListener("click", () => {
+      const childId = document.getElementById("sched-child").value;
+      const day = document.getElementById("sched-day").value;
+      const time = document.getElementById("sched-time").value;
+      if (!childId) return;
+      DATA.schedule = [...DATA.schedule, { id: uid("s"), childId, day, time }];
+      persist();
+    });
+  }
+  document.querySelectorAll(".del-schedule-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "schedule", id: el.dataset.id }; render(); }));
+
+  // 특이사항 필터
+  const notesFilter = document.getElementById("notes-filter");
+  if (notesFilter) notesFilter.addEventListener("change", (e) => { NOTES_FILTER_TEACHER = e.target.value; render(); });
+
+  // 삭제 확인/취소 공통
+  document.querySelectorAll(".confirm-yes").forEach(el => el.addEventListener("click", () => {
+    const { type, id } = el.dataset;
+    if (type === "teacher") {
+      DATA.teachers = DATA.teachers.filter(t => t.id !== id);
+      DATA.children = DATA.children.map(c => c.teacherId === id ? { ...c, teacherId: null } : c);
+    } else if (type === "child") {
+      DATA.children = DATA.children.filter(c => c.id !== id);
+      DATA.schedule = DATA.schedule.filter(s => s.childId !== id);
+      DATA.notes = DATA.notes.filter(n => n.childId !== id);
+    } else if (type === "schedule") {
+      DATA.schedule = DATA.schedule.filter(s => s.id !== id);
+    }
+    PENDING_DELETE = null;
+    persist();
+  }));
+  document.querySelectorAll(".confirm-no").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = null; render(); }));
+}
+
+/* ------------------------------------------------------------------ */
+/*  초기화                                                              */
+/* ------------------------------------------------------------------ */
+(function init() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    DATA = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DATA));
+    if (!raw) localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+  } catch (e) {
+    DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
+  }
+  render();
+})();
+</script>
+</body>
+</html>
