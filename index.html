@@ -246,6 +246,8 @@ let CHILD_FORM = { name: "", age: "", startDate: "", teacherId: "" };
 let SCHEDULE_FORM = { childId: "", day: "월", time: "10:00" };
 let NOTES_FILTER_TEACHER = "";
 let PIN_SAVE_MSG = false;
+let CHILDREN_FILTER_TEACHER = "";
+let SCHEDULE_VIEW_TEACHER = "";
 
 // 교사 로그인 PIN
 let TEACHER_LOGIN_ID = null;   // 이름 선택 후 PIN 입력 대기중인 교사 id
@@ -264,7 +266,10 @@ let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
 
 function persist() {
   db.ref('app-data').set(DATA)
-    .catch(e => console.error("저장 실패", e));
+    .catch(e => {
+      console.error("저장 실패", e);
+      alert("저장에 실패했어요. 인터넷 연결 또는 Firebase 설정을 확인해주세요.\n오류: " + e.message);
+    });
   render();
 }
 
@@ -390,7 +395,7 @@ function attachLoginEvents() {
   }
 }
 function submitPin() {
-  if (PIN_INPUT === DATA.adminPin) {
+  if ((PIN_INPUT || "").trim() === (DATA.adminPin || "").trim()) {
     SHOW_PIN_MODAL = false; PIN_INPUT = ""; PIN_ERROR = "";
     CURRENT_USER = { role: "admin" }; ADMIN_TAB = "teachers";
     render();
@@ -403,8 +408,9 @@ function submitPin() {
 function submitTeacherPin() {
   const t = DATA.teachers.find(x => x.id === TEACHER_LOGIN_ID);
   if (!t) { TEACHER_LOGIN_ID = null; render(); return; }
-  const expected = t.pin || "";
-  if (expected && TEACHER_PIN_INPUT === expected) {
+  const expected = (t.pin || "").trim();
+  const inputVal = (TEACHER_PIN_INPUT || "").trim();
+  if (expected && inputVal === expected) {
     TEACHER_LOGIN_ID = null; TEACHER_PIN_INPUT = ""; TEACHER_PIN_ERROR = "";
     CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable";
     render();
@@ -871,7 +877,19 @@ function teachersPanelHtml() {
 function childrenPanelHtml() {
   const options = (selected) => `<option value="">담당 교사 미배정</option>` + DATA.teachers.map(t => `<option value="${t.id}" ${selected===t.id?"selected":""}>${esc(t.name)} 선생님</option>`).join("");
 
- const rows = DATA.children.map(c => {
+  const teacherFilterTabs = `
+    <div class="scrollbar" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;">
+      <div class="tab children-filter-tab ${CHILDREN_FILTER_TEACHER === "" ? "active" : ""}" data-id="">전체</div>
+      ${DATA.teachers.map(t => `<div class="tab children-filter-tab ${CHILDREN_FILTER_TEACHER === t.id ? "active" : ""}" data-id="${t.id}">${esc(t.name)} 선생님</div>`).join("")}
+      <div class="tab children-filter-tab ${CHILDREN_FILTER_TEACHER === "__none" ? "active" : ""}" data-id="__none">미배정</div>
+    </div>`;
+  const filteredChildren = DATA.children.filter(c => {
+    if (!CHILDREN_FILTER_TEACHER) return true;
+    if (CHILDREN_FILTER_TEACHER === "__none") return !c.teacherId;
+    return c.teacherId === CHILDREN_FILTER_TEACHER;
+  });
+
+ const rows = filteredChildren.map(c => {
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
     const info = computePaymentInfo(c, DATA.cancellations);
     return `
@@ -920,10 +938,20 @@ function childrenPanelHtml() {
         <button id="add-child-btn" class="btn btn-primary" style="padding:9px 0;">${icon('plus',14)} 아동 등록</button>
       </div>
     </div>
-    ${DATA.children.length === 0 ? emptyStateHtml('baby', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
+    ${teacherFilterTabs}
+    ${filteredChildren.length === 0 ? emptyStateHtml('baby', "해당 조건의 아동이 없어요") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
 }
 
 function schedulePanelHtml() {
+  const scheduleTeacherTabs = `
+    <div class="scrollbar" style="display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;">
+      <div class="tab schedule-view-tab ${SCHEDULE_VIEW_TEACHER === "" ? "active" : ""}" data-id="">전체</div>
+      ${DATA.teachers.map(t => `<div class="tab schedule-view-tab ${SCHEDULE_VIEW_TEACHER === t.id ? "active" : ""}" data-id="${t.id}">${esc(t.name)} 선생님</div>`).join("")}
+    </div>`;
+  const gridChildIds = SCHEDULE_VIEW_TEACHER ? new Set(DATA.children.filter(c => c.teacherId === SCHEDULE_VIEW_TEACHER).map(c => c.id)) : null;
+  const gridEntries = gridChildIds ? DATA.schedule.filter(s => gridChildIds.has(s.childId)) : DATA.schedule;
+  const gridChildren = gridChildIds ? DATA.children.filter(c => gridChildIds.has(c.id)) : DATA.children;
+
   const childOptions = `<option value="">아동 선택</option>` + DATA.children.map(c => {
     const t = DATA.teachers.find(tt => tt.id === c.teacherId);
     return `<option value="${c.id}" ${SCHEDULE_FORM.childId===c.id?"selected":""}>${esc(c.name)} ${t?`(${esc(t.name)})`:"(미배정)"}</option>`;
@@ -947,7 +975,11 @@ function schedulePanelHtml() {
   }).join("");
 
   return `
-    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">시간표 관리</h2>
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">전체 시간표</h2>
+    ${scheduleTeacherTabs}
+    ${timetableGridHtml(gridEntries, gridChildren)}
+
+    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">시간표 관리</h2>
     <div class="card" style="padding:16px;margin-bottom:14px;">
       <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;">새 수업 등록</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1133,6 +1165,18 @@ document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventList
   // 특이사항 필터
   const notesFilter = document.getElementById("notes-filter");
   if (notesFilter) notesFilter.addEventListener("change", (e) => { NOTES_FILTER_TEACHER = e.target.value; render(); });
+
+  // 아동 관리: 교사별 탭 필터
+  document.querySelectorAll(".children-filter-tab").forEach(el => el.addEventListener("click", () => {
+    CHILDREN_FILTER_TEACHER = el.dataset.id;
+    render();
+  }));
+
+  // 시간표: 교사별 탭 필터
+  document.querySelectorAll(".schedule-view-tab").forEach(el => el.addEventListener("click", () => {
+    SCHEDULE_VIEW_TEACHER = el.dataset.id;
+    render();
+  }));
 
   // 삭제 확인/취소 공통
   document.querySelectorAll(".confirm-yes").forEach(el => el.addEventListener("click", () => {
