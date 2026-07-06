@@ -103,6 +103,7 @@ function icon(name, size = 20, color) {
     loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
     pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    ban: '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>',
   };
   return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths[name] || ''}</svg>`;
 }
@@ -112,7 +113,8 @@ function icon(name, size = 20, color) {
 /* ------------------------------------------------------------------ */
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const STORAGE_KEY = "visit_teacher_app_data_v1";
-const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], adminPin: "1234" };
+const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], cancellations: [], adminPin: "1234" };
+const SESSIONS_PER_CYCLE = 4; // 4회차마다 다음 달 교육비 선불 결제
 
 function uid(prefix = "id") {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -131,17 +133,72 @@ function colorForChild(id) {
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return CHILD_PALETTE[hash % CHILD_PALETTE.length];
 }
-function getNextPaymentDate(payDay) {
-  const now = new Date();
-  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let d = new Date(now.getFullYear(), now.getMonth(), payDay);
-  if (d < today0) d = new Date(now.getFullYear(), now.getMonth() + 1, payDay);
-  return d;
+function toDateStr(d) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+function parseDateStr(s) {
+  const [y,m,d] = s.split("-").map(Number);
+  return new Date(y, m-1, d);
 }
 function daysUntil(date) {
   const today0 = new Date(); today0.setHours(0,0,0,0);
   const d0 = new Date(date); d0.setHours(0,0,0,0);
   return Math.round((d0 - today0) / 86400000);
+}
+/*
+ * 수업 시작일부터 매주 1회 수업을 한다고 가정하고, 휴강(취소)된 주는 회차에서 제외한다.
+ * 유효 회차가 4의 배수가 되는 날 = 다음 달 교육비를 선불로 결제하는 날.
+ * 휴강이 생기면 그만큼 유효 회차 도달 시점이 뒤로 밀리면서 결제일도 함께 밀린다.
+ */
+function computePaymentInfo(child, cancellations) {
+  if (!child.startDate) return null;
+  const start = parseDateStr(child.startDate);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const myCancelDates = new Set(cancellations.filter(c => c.childId === child.id).map(c => c.date));
+  let validCount = 0;
+  let d = new Date(start);
+  let sessionsDoneBeforeToday = 0;
+  for (let i = 0; i < 1000; i++) {
+    const dateStr = toDateStr(d);
+    const isCancelled = myCancelDates.has(dateStr);
+    if (!isCancelled) {
+      validCount++;
+      if (d < today) sessionsDoneBeforeToday = validCount;
+      if (validCount % SESSIONS_PER_CYCLE === 0 && d >= today) {
+        return {
+          nextDate: new Date(d),
+          dleft: daysUntil(d),
+          cycleProgress: sessionsDoneBeforeToday % SESSIONS_PER_CYCLE,
+        };
+      }
+    }
+    d.setDate(d.getDate() + 7);
+  }
+  return null;
+}
+function getChildCancellations(childId, cancellations) {
+  return cancellations.filter(c => c.childId === childId).sort((a,b) => a.date < b.date ? 1 : -1);
+}
+/* 오늘을 기준으로 앞뒤 N개의 수업 예정일을 생성 (휴강 체크용 빠른 선택지) */
+function upcomingSessionDates(child, cancellations, pastCount = 2, futureCount = 4) {
+  if (!child.startDate) return [];
+  const start = parseDateStr(child.startDate);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const all = [];
+  let d = new Date(start);
+  for (let i = 0; i < 1000; i++) {
+    all.push(new Date(d));
+    if (d > today && all.length > 400) break;
+    d.setDate(d.getDate() + 7);
+    if (d.getFullYear() > today.getFullYear() + 2) break;
+  }
+  let idx = all.findIndex(dt => dt >= today);
+  if (idx === -1) idx = all.length - 1;
+  const from = Math.max(0, idx - pastCount);
+  const to = Math.min(all.length, idx + futureCount + 1);
+  const myCancelDates = new Set(cancellations.filter(c => c.childId === child.id).map(c => c.date));
+  return all.slice(from, to).map(dt => ({ date: dt, dateStr: toDateStr(dt), cancelled: myCancelDates.has(toDateStr(dt)) }));
 }
 function formatDate(d) { return `${d.getMonth() + 1}월 ${d.getDate()}일`; }
 function dDayLabel(dleft) {
@@ -172,10 +229,25 @@ let PIN_INPUT = "";
 let PIN_ERROR = "";
 let SHOW_PAYMENT_POPUP = false;
 let SHOW_SETTINGS = false;
-let CHILD_FORM = { name: "", age: "", paymentDay: 15, teacherId: "" };
+let CHILD_FORM = { name: "", age: "", startDate: "", teacherId: "" };
 let SCHEDULE_FORM = { childId: "", day: "월", time: "10:00" };
 let NOTES_FILTER_TEACHER = "";
 let PIN_SAVE_MSG = false;
+
+// 교사 로그인 PIN
+let TEACHER_LOGIN_ID = null;   // 이름 선택 후 PIN 입력 대기중인 교사 id
+let TEACHER_PIN_INPUT = "";
+let TEACHER_PIN_ERROR = "";
+
+// 팀장 화면: 새 교사 등록용 PIN 입력값 + 기존 교사 PIN 수정 상태
+let NEW_TEACHER_PIN = "";
+let EDIT_TEACHER_PIN_ID = null;
+let EDIT_TEACHER_PIN_VALUE = "";
+
+// 휴강(취소) 관리
+let CANCEL_OPEN = null;        // { childId, dateStr } 현재 사유 입력 중인 항목
+let CANCEL_REASON_INPUT = "";
+let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
 
 function persist() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); } catch (e) { console.error("저장 실패", e); }
@@ -235,6 +307,26 @@ function loginScreenHtml() {
       </div>
     </div>` : "";
 
+  const teacherPinModal = TEACHER_LOGIN_ID ? (() => {
+    const t = DATA.teachers.find(x => x.id === TEACHER_LOGIN_ID);
+    if (!t) return "";
+    return `
+    <div class="modal-overlay" id="teacher-pin-overlay">
+      <div class="card fadein" style="width:100%;max-width:340px;padding:22px;">
+        <div style="text-align:center;margin-bottom:14px;">
+          ${avatarHtml(t.name, t.id, 44)}
+          <h2 style="font-size:17px;font-weight:700;margin:10px 0 2px;">${esc(t.name)} 선생님</h2>
+          <p style="font-size:12.5px;color:var(--ink-soft);">PIN 번호를 입력해주세요</p>
+        </div>
+        <input id="teacher-pin-input" class="input" style="width:100%;text-align:center;letter-spacing:4px;font-size:18px;margin-bottom:8px;"
+          type="password" inputmode="numeric" maxlength="8" value="${esc(TEACHER_PIN_INPUT)}" placeholder="••••" autofocus />
+        ${TEACHER_PIN_ERROR ? `<div style="color:var(--rose);font-size:12.5px;margin-bottom:8px;display:flex;gap:4px;align-items:center;">${icon('alert',13)} ${esc(TEACHER_PIN_ERROR)}</div>` : ""}
+        <button id="teacher-pin-submit" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:6px;">로그인</button>
+        <button id="teacher-pin-cancel" class="btn btn-ghost" style="width:100%;padding:9px 0;margin-top:8px;">다른 선생님 선택</button>
+      </div>
+    </div>`;
+  })() : "";
+
   return `
     <div class="dotbg" style="display:flex;align-items:center;justify-content:center;padding:20px;min-height:100vh;">
       <div style="width:100%;max-width:440px;">
@@ -249,14 +341,14 @@ function loginScreenHtml() {
         </div>
       </div>
     </div>
-    ${pinModal}`;
+    ${pinModal}
+    ${teacherPinModal}`;
 }
 
 function attachLoginEvents() {
   document.querySelectorAll(".teacher-login-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      const t = DATA.teachers.find(x => x.id === btn.dataset.id);
-      if (t) { CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable"; render(); }
+      TEACHER_LOGIN_ID = btn.dataset.id; TEACHER_PIN_INPUT = ""; TEACHER_PIN_ERROR = ""; render();
     });
   });
   const openBtn = document.getElementById("admin-login-open");
@@ -271,6 +363,17 @@ function attachLoginEvents() {
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitPin(); });
     document.getElementById("pin-submit").addEventListener("click", submitPin);
   }
+
+  const teacherOverlay = document.getElementById("teacher-pin-overlay");
+  if (teacherOverlay) {
+    teacherOverlay.addEventListener("mousedown", (e) => { if (e.target === teacherOverlay) { TEACHER_LOGIN_ID = null; render(); } });
+    const tInput = document.getElementById("teacher-pin-input");
+    tInput.focus();
+    tInput.addEventListener("input", (e) => { TEACHER_PIN_INPUT = e.target.value; TEACHER_PIN_ERROR = ""; });
+    tInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitTeacherPin(); });
+    document.getElementById("teacher-pin-submit").addEventListener("click", submitTeacherPin);
+    document.getElementById("teacher-pin-cancel").addEventListener("click", () => { TEACHER_LOGIN_ID = null; render(); });
+  }
 }
 function submitPin() {
   if (PIN_INPUT === DATA.adminPin) {
@@ -281,6 +384,23 @@ function submitPin() {
     PIN_ERROR = "PIN 번호가 올바르지 않아요.";
     render();
     setTimeout(() => { const el = document.getElementById("pin-input"); if (el) el.focus(); }, 0);
+  }
+}
+function submitTeacherPin() {
+  const t = DATA.teachers.find(x => x.id === TEACHER_LOGIN_ID);
+  if (!t) { TEACHER_LOGIN_ID = null; render(); return; }
+  const expected = t.pin || "";
+  if (expected && TEACHER_PIN_INPUT === expected) {
+    TEACHER_LOGIN_ID = null; TEACHER_PIN_INPUT = ""; TEACHER_PIN_ERROR = "";
+    CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable";
+    render();
+  } else if (!expected) {
+    TEACHER_PIN_ERROR = "PIN이 아직 설정되지 않았어요. 팀장님께 문의해주세요.";
+    render();
+  } else {
+    TEACHER_PIN_ERROR = "PIN 번호가 올바르지 않아요.";
+    render();
+    setTimeout(() => { const el = document.getElementById("teacher-pin-input"); if (el) el.focus(); }, 0);
   }
 }
 
@@ -375,16 +495,17 @@ function teacherAppHtml() {
   const myChildIds = new Set(myChildren.map(c => c.id));
   const mySchedule = DATA.schedule.filter(s => myChildIds.has(s.childId));
   const paymentList = myChildren.map(c => {
-    const nextDate = getNextPaymentDate(c.paymentDay);
-    return { ...c, nextDate, dleft: daysUntil(nextDate) };
-  }).sort((a,b) => a.dleft - b.dleft);
-  const duePayments = paymentList.filter(c => c.dleft <= 3);
+    const info = computePaymentInfo(c, DATA.cancellations);
+    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null };
+  }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
+  const duePayments = paymentList.filter(c => c.dleft !== null && c.dleft <= 3);
 
   if (!NOTE_CHILD_ID && myChildren.length > 0) NOTE_CHILD_ID = myChildren[0].id;
 
   const tabs = [
     { key: "timetable", label: "내 시간표", icon: "calendar" },
     { key: "children", label: "내 아동", icon: "users" },
+    { key: "cancel", label: "휴강 체크", icon: "ban" },
     { key: "notes", label: "특이사항", icon: "note" },
     { key: "payments", label: "결제일", icon: "wallet" },
   ];
@@ -402,7 +523,7 @@ function teacherAppHtml() {
           ${avatarHtml(c.name, c.id, 40)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
-            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 · 결제일 매월 ${c.paymentDay}일</div>
+            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 ${c.startDate ? `· 수업 시작일 ${esc(c.startDate)}` : "· 수업 시작일 미설정"}</div>
           </div>
           <button class="btn btn-ghost go-note-btn" data-id="${c.id}" style="padding:7px 10px;font-size:12px;">${icon('pencil',13)} 특이사항</button>
         </div>`).join("")}</div>`;
@@ -440,6 +561,79 @@ function teacherAppHtml() {
           </div>
         </div>`;
     }
+  } else if (TEACHER_TAB === "cancel") {
+    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">휴강 체크</h2>`;
+    if (myChildren.length === 0) {
+      body += emptyStateHtml('ban', "배정된 아동이 없어요");
+    } else {
+      body += `<div style="display:grid;gap:14px;">${myChildren.map(c => {
+        if (!c.startDate) {
+          return `<div class="card" style="padding:14px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">${avatarHtml(c.name,c.id,32)}<div style="font-weight:700;font-size:14px;">${esc(c.name)}</div></div>
+            <div style="font-size:12.5px;color:var(--ink-soft);">팀장님이 수업 시작일을 등록하면 휴강 체크를 할 수 있어요.</div>
+          </div>`;
+        }
+        const dates = upcomingSessionDates(c, DATA.cancellations, 2, 4);
+        const chips = dates.map(dInfo => {
+          const label = `${dInfo.date.getMonth()+1}/${dInfo.date.getDate()}`;
+          const isOpen = CANCEL_OPEN && CANCEL_OPEN.childId === c.id && CANCEL_OPEN.dateStr === dInfo.dateStr;
+          if (dInfo.cancelled) {
+            const rec = DATA.cancellations.find(x => x.childId === c.id && x.date === dInfo.dateStr);
+            return `<button class="btn cancel-chip-restore" data-child="${c.id}" data-date="${dInfo.dateStr}" title="${esc(rec ? rec.reason : "")}"
+              style="padding:6px 10px;font-size:12px;background:#F5E1E4;color:var(--rose);border-radius:999px;">${label} 휴강 ${icon('x',11)}</button>`;
+          }
+          return `<button class="btn cancel-chip-open" data-child="${c.id}" data-date="${dInfo.dateStr}"
+            style="padding:6px 10px;font-size:12px;background:${isOpen? "var(--paper-2)":"transparent"};border:1px solid var(--line);border-radius:999px;color:var(--ink-soft);">${label}</button>`;
+        }).join("");
+        const openReasonBox = (CANCEL_OPEN && CANCEL_OPEN.childId === c.id) ? `
+          <div class="fadein" style="margin-top:10px;padding:10px;background:var(--paper-2);border-radius:10px;">
+            <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">${CANCEL_OPEN.dateStr} 휴강 사유</div>
+            <textarea id="cancel-reason-input" class="textarea" style="width:100%;min-height:56px;" placeholder="예) 교사 개인 사정으로 휴강합니다.">${esc(CANCEL_REASON_INPUT)}</textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="btn btn-primary cancel-confirm-btn" data-child="${c.id}" data-date="${CANCEL_OPEN.dateStr}" style="padding:7px 12px;">${icon('check',13)} 휴강 등록</button>
+              <button class="btn btn-ghost cancel-cancel-btn" style="padding:7px 12px;">취소</button>
+            </div>
+          </div>` : "";
+        return `
+          <div class="card" style="padding:14px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              ${avatarHtml(c.name, c.id, 32)}
+              <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">수업 예정일을 눌러 휴강을 등록하거나, 등록된 휴강을 눌러 취소할 수 있어요.</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${chips}</div>
+            ${openReasonBox}
+          </div>`;
+      }).join("")}</div>
+      <div class="card" style="padding:16px;margin-top:14px;">
+        <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;">특정 날짜 직접 등록</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <select id="manual-cancel-child" class="select" style="flex:1;min-width:120px;">
+            ${myChildren.map(c => `<option value="${c.id}" ${CANCEL_MANUAL_FORM.childId===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}
+          </select>
+          <input id="manual-cancel-date" class="input" type="date" style="min-width:150px;" value="${esc(CANCEL_MANUAL_FORM.date)}" />
+        </div>
+        <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 (교사 개인 사정 등)">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
+        <button id="manual-cancel-add-btn" class="btn btn-primary" style="padding:9px 16px;margin-top:10px;">${icon('plus',14)} 휴강 등록</button>
+      </div>
+      <div style="margin-top:18px;">
+        <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:8px;">등록된 휴강 내역</div>
+        ${(() => {
+          const mine = DATA.cancellations.filter(x => myChildIds.has(x.childId)).sort((a,b)=> a.date < b.date ? 1 : -1);
+          if (mine.length === 0) return `<div style="font-size:13px;color:var(--ink-soft);">등록된 휴강이 없어요.</div>`;
+          return `<div style="display:grid;gap:8px;">${mine.map(x => {
+            const child = DATA.children.find(cc => cc.id === x.childId);
+            return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
+              <div style="flex:1;">
+                <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
+                <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${esc(x.reason || "사유 없음")}</div>
+              </div>
+              <button class="btn btn-ghost del-cancellation-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
+            </div>`;
+          }).join("")}</div>`;
+        })()}
+      </div>`;
+    }
   } else if (TEACHER_TAB === "payments") {
     body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제일 현황</h2>`;
     if (paymentList.length === 0) {
@@ -450,9 +644,9 @@ function teacherAppHtml() {
           ${avatarHtml(c.name, c.id, 38)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
-            <div style="font-size:12px;color:var(--ink-soft);">다음 결제일 ${formatDate(c.nextDate)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);">${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일이 설정되지 않았어요"}</div>
           </div>
-          <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+          ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>` : ""}
         </div>`).join("")}</div>`;
     }
   }
@@ -513,6 +707,52 @@ function attachTeacherEvents() {
   }));
   document.querySelectorAll(".confirm-no").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = null; render(); }));
 
+  // 휴강 체크: 빠른 칩
+  document.querySelectorAll(".cancel-chip-open").forEach(el => el.addEventListener("click", () => {
+    const childId = el.dataset.child, dateStr = el.dataset.date;
+    if (CANCEL_OPEN && CANCEL_OPEN.childId === childId && CANCEL_OPEN.dateStr === dateStr) {
+      CANCEL_OPEN = null;
+    } else {
+      CANCEL_OPEN = { childId, dateStr }; CANCEL_REASON_INPUT = "";
+    }
+    render();
+  }));
+  document.querySelectorAll(".cancel-chip-restore").forEach(el => el.addEventListener("click", () => {
+    const childId = el.dataset.child, dateStr = el.dataset.date;
+    DATA.cancellations = DATA.cancellations.filter(x => !(x.childId === childId && x.date === dateStr));
+    persist();
+  }));
+  const cancelReasonInput = document.getElementById("cancel-reason-input");
+  if (cancelReasonInput) cancelReasonInput.addEventListener("input", (e) => { CANCEL_REASON_INPUT = e.target.value; });
+  document.querySelectorAll(".cancel-confirm-btn").forEach(el => el.addEventListener("click", () => {
+    const childId = el.dataset.child, dateStr = el.dataset.date;
+    DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date: dateStr, reason: CANCEL_REASON_INPUT.trim(), teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
+    CANCEL_OPEN = null; CANCEL_REASON_INPUT = "";
+    persist();
+  }));
+  document.querySelectorAll(".cancel-cancel-btn").forEach(el => el.addEventListener("click", () => { CANCEL_OPEN = null; render(); }));
+
+  // 휴강 체크: 직접 날짜 등록
+  const manualAddBtn = document.getElementById("manual-cancel-add-btn");
+  if (manualAddBtn) manualAddBtn.addEventListener("click", () => {
+    const childId = document.getElementById("manual-cancel-child").value;
+    const date = document.getElementById("manual-cancel-date").value;
+    const reason = document.getElementById("manual-cancel-reason").value.trim();
+    if (!childId || !date) return;
+    const exists = DATA.cancellations.some(x => x.childId === childId && x.date === date);
+    if (exists) {
+      DATA.cancellations = DATA.cancellations.map(x => (x.childId === childId && x.date === date) ? { ...x, reason } : x);
+    } else {
+      DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date, reason, teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
+    }
+    CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
+    persist();
+  });
+  document.querySelectorAll(".del-cancellation-btn").forEach(el => el.addEventListener("click", () => {
+    DATA.cancellations = DATA.cancellations.filter(x => x.id !== el.dataset.id);
+    persist();
+  }));
+
   const popupOverlay = document.getElementById("payment-overlay");
   if (popupOverlay) {
     popupOverlay.addEventListener("mousedown", (e) => { if (e.target === popupOverlay) { SHOW_PAYMENT_POPUP = false; render(); } });
@@ -523,7 +763,10 @@ function attachTeacherEvents() {
   if (!teacherAppHtml.__shownFor || teacherAppHtml.__shownFor !== CURRENT_USER.id) {
     teacherAppHtml.__shownFor = CURRENT_USER.id;
     const myChildren = DATA.children.filter(c => c.teacherId === CURRENT_USER.id);
-    const due = myChildren.map(c => ({ ...c, dleft: daysUntil(getNextPaymentDate(c.paymentDay)) })).filter(c => c.dleft <= 3);
+    const due = myChildren.map(c => {
+      const info = computePaymentInfo(c, DATA.cancellations);
+      return { ...c, dleft: info ? info.dleft : null };
+    }).filter(c => c.dleft !== null && c.dleft <= 3);
     if (due.length > 0 && !SHOW_PAYMENT_POPUP) { SHOW_PAYMENT_POPUP = true; render(); }
   }
 }
@@ -572,50 +815,64 @@ function adminAppHtml() {
 function teachersPanelHtml() {
   const rows = DATA.teachers.map(t => {
     const count = DATA.children.filter(c => c.teacherId === t.id).length;
+    const isEditingPin = EDIT_TEACHER_PIN_ID === t.id;
     return `
-      <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
-        ${avatarHtml(t.name, t.id, 38)}
-        <div style="flex:1;">
-          <div style="font-weight:700;font-size:14.5px;">${esc(t.name)} 선생님</div>
-          <div style="font-size:12px;color:var(--ink-soft);">담당 아동 ${count}명</div>
+      <div class="card" style="padding:14px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          ${avatarHtml(t.name, t.id, 38)}
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:14.5px;">${esc(t.name)} 선생님</div>
+            <div style="font-size:12px;color:var(--ink-soft);">담당 아동 ${count}명 · PIN ${t.pin ? "설정됨" : "미설정"}</div>
+          </div>
+          <button class="btn btn-ghost edit-teacher-pin-btn" data-id="${t.id}" style="padding:7px 10px;font-size:12px;">${icon('lock',13)} PIN</button>
+          ${PENDING_DELETE && PENDING_DELETE.type === "teacher" && PENDING_DELETE.id === t.id
+            ? confirmInlineHtml("teacher", t.id)
+            : `<button class="btn btn-danger del-teacher-btn" data-id="${t.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
         </div>
-        ${PENDING_DELETE && PENDING_DELETE.type === "teacher" && PENDING_DELETE.id === t.id
-          ? confirmInlineHtml("teacher", t.id)
-          : `<button class="btn btn-danger del-teacher-btn" data-id="${t.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
+        ${isEditingPin ? `
+          <div class="fadein" style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+            <input id="edit-pin-input" class="input" style="flex:1;" inputmode="numeric" maxlength="8" placeholder="새 PIN (4자리 이상)" value="${esc(EDIT_TEACHER_PIN_VALUE)}" />
+            <button class="btn btn-primary save-teacher-pin-btn" data-id="${t.id}" style="padding:0 14px;">저장</button>
+            <button class="btn btn-ghost cancel-teacher-pin-btn" style="padding:0 14px;">취소</button>
+          </div>` : ""}
       </div>`;
   }).join("");
 
   return `
     <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">교사 관리</h2>
     <div class="card" style="padding:16px;margin-bottom:14px;">
-      <div style="display:flex;gap:8px;">
-        <input id="teacher-name-input" class="input" style="flex:1;" placeholder="선생님 이름" />
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="teacher-name-input" class="input" style="flex:2;min-width:120px;" placeholder="선생님 이름" />
+        <input id="teacher-pin-new-input" class="input" style="flex:1;min-width:100px;" inputmode="numeric" maxlength="8" placeholder="PIN (선택)" />
         <button id="add-teacher-btn" class="btn btn-primary" style="padding:0 14px;">${icon('plus',14)} 추가</button>
       </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">PIN을 비워두면 나중에 목록에서 지정할 수 있어요. PIN이 없으면 교사가 로그인할 수 없어요.</div>
     </div>
     ${DATA.teachers.length === 0 ? emptyStateHtml('users', "등록된 선생님이 없어요", "이름을 입력해서 첫 선생님을 등록해보세요.") : `<div style="display:grid;gap:8px;">${rows}</div>`}`;
 }
 
 function childrenPanelHtml() {
   const options = (selected) => `<option value="">담당 교사 미배정</option>` + DATA.teachers.map(t => `<option value="${t.id}" ${selected===t.id?"selected":""}>${esc(t.name)} 선생님</option>`).join("");
-  const dayOptions = (selected) => Array.from({length:31},(_,i)=>i+1).map(d => `<option value="${d}" ${Number(selected)===d?"selected":""}>매월 ${d}일 결제</option>`).join("");
 
   const rows = DATA.children.map(c => {
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
+    const info = computePaymentInfo(c, DATA.cancellations);
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
           ${avatarHtml(c.name, c.id, 38)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
-            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세</div>
+            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 ${info ? `· 다음 결제일 ${formatDate(info.nextDate)} (${dDayLabel(info.dleft)})` : "· 수업 시작일 미설정"}</div>
           </div>
           ${PENDING_DELETE && PENDING_DELETE.type === "child" && PENDING_DELETE.id === c.id
             ? confirmInlineHtml("child", c.id)
             : `<button class="btn btn-danger del-child-btn" data-id="${c.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <select class="select child-payday-select" data-id="${c.id}" style="font-size:12.5px;">${dayOptions(c.paymentDay)}</select>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">수업 시작일
+            <input type="date" class="input child-startdate-input" data-id="${c.id}" style="font-size:12.5px;padding:6px 8px;" value="${esc(c.startDate || "")}" />
+          </label>
           <select class="select child-teacher-select" data-id="${c.id}" style="font-size:12.5px;">${options(c.teacherId)}</select>
           ${!teacher ? `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>` : ""}
         </div>
@@ -632,8 +889,12 @@ function childrenPanelHtml() {
           <input id="new-child-age" class="input" style="flex:1;min-width:80px;" placeholder="나이" type="number" min="0" value="${esc(CHILD_FORM.age)}" />
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <select id="new-child-payday" class="select" style="flex:1;min-width:140px;">${dayOptions(CHILD_FORM.paymentDay)}</select>
-          <select id="new-child-teacher" class="select" style="flex:1;min-width:140px;">${options(CHILD_FORM.teacherId)}</select>
+          <label style="flex:1;min-width:160px;font-size:12px;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px;">수업 시작일
+            <input id="new-child-startdate" class="input" type="date" value="${esc(CHILD_FORM.startDate)}" />
+          </label>
+          <label style="flex:1;min-width:140px;font-size:12px;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px;">담당 교사
+            <select id="new-child-teacher" class="select">${options(CHILD_FORM.teacherId)}</select>
+          </label>
         </div>
         <button id="add-child-btn" class="btn btn-primary" style="padding:9px 0;">${icon('plus',14)} 아동 등록</button>
       </div>
@@ -708,23 +969,41 @@ function notesPanelHtml() {
 
 function paymentsPanelHtml() {
   const rows = DATA.children.map(c => {
-    const nextDate = getNextPaymentDate(c.paymentDay);
-    const dleft = daysUntil(nextDate);
+    const info = computePaymentInfo(c, DATA.cancellations);
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
-    return { ...c, nextDate, dleft, teacherName: teacher ? teacher.name : "미배정" };
-  }).sort((a,b) => a.dleft - b.dleft);
+    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, teacherName: teacher ? teacher.name : "미배정" };
+  }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
 
   const rowsHtml = rows.map(c => `
     <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
       ${avatarHtml(c.name, c.id, 38)}
       <div style="flex:1;">
         <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
-        <div style="font-size:12px;color:var(--ink-soft);">${esc(c.teacherName)} 선생님 · 다음 결제일 ${formatDate(c.nextDate)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);">${esc(c.teacherName)} 선생님 · ${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</div>
       </div>
-      <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+      ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>` : ""}
     </div>`).join("");
 
-  return `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rowsHtml}</div>`}`;
+  const cancellations = [...DATA.cancellations].sort((a,b) => a.date < b.date ? 1 : -1);
+  const cancelHtml = cancellations.length === 0
+    ? `<div style="font-size:13px;color:var(--ink-soft);">등록된 휴강이 없어요.</div>`
+    : `<div style="display:grid;gap:8px;">${cancellations.map(x => {
+        const child = DATA.children.find(cc => cc.id === x.childId);
+        const teacher = DATA.teachers.find(t => t.id === x.teacherId);
+        return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${teacher?`${esc(teacher.name)} 선생님 · `:""}${esc(x.reason || "사유 없음")}</div>
+          </div>
+          <button class="btn btn-ghost del-cancellation-admin-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
+        </div>`;
+      }).join("")}</div>`;
+
+  return `
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>
+    ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rowsHtml}</div>`}
+    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">휴강 내역</h2>
+    ${cancelHtml}`;
 }
 
 function attachAdminEvents() {
@@ -751,16 +1030,33 @@ function attachAdminEvents() {
   const addTeacherBtn = document.getElementById("add-teacher-btn");
   if (addTeacherBtn) {
     const nameInput = document.getElementById("teacher-name-input");
+    const pinInput = document.getElementById("teacher-pin-new-input");
     const addTeacher = () => {
       const name = nameInput.value.trim();
+      const pin = pinInput.value.trim();
       if (!name) return;
-      DATA.teachers = [...DATA.teachers, { id: uid("t"), name }];
+      DATA.teachers = [...DATA.teachers, { id: uid("t"), name, pin: pin || "" }];
       persist();
     };
     addTeacherBtn.addEventListener("click", addTeacher);
     nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addTeacher(); });
+    pinInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addTeacher(); });
   }
   document.querySelectorAll(".del-teacher-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "teacher", id: el.dataset.id }; render(); }));
+  document.querySelectorAll(".edit-teacher-pin-btn").forEach(el => el.addEventListener("click", () => {
+    const t = DATA.teachers.find(x => x.id === el.dataset.id);
+    EDIT_TEACHER_PIN_ID = el.dataset.id;
+    EDIT_TEACHER_PIN_VALUE = t && t.pin ? t.pin : "";
+    render();
+  }));
+  document.querySelectorAll(".cancel-teacher-pin-btn").forEach(el => el.addEventListener("click", () => { EDIT_TEACHER_PIN_ID = null; render(); }));
+  document.querySelectorAll(".save-teacher-pin-btn").forEach(el => el.addEventListener("click", () => {
+    const val = document.getElementById("edit-pin-input").value.trim();
+    if (val.length < 4) return;
+    DATA.teachers = DATA.teachers.map(t => t.id === el.dataset.id ? { ...t, pin: val } : t);
+    EDIT_TEACHER_PIN_ID = null;
+    persist();
+  }));
 
   // 아동 관리
   const addChildBtn = document.getElementById("add-child-btn");
@@ -768,16 +1064,16 @@ function attachAdminEvents() {
     addChildBtn.addEventListener("click", () => {
       const name = document.getElementById("new-child-name").value.trim();
       const age = document.getElementById("new-child-age").value;
-      const paymentDay = document.getElementById("new-child-payday").value;
+      const startDate = document.getElementById("new-child-startdate").value;
       const teacherId = document.getElementById("new-child-teacher").value;
       if (!name || !age) return;
-      DATA.children = [...DATA.children, { id: uid("c"), name, age: Number(age), paymentDay: Number(paymentDay), teacherId: teacherId || null }];
-      CHILD_FORM = { name: "", age: "", paymentDay: 15, teacherId: "" };
+      DATA.children = [...DATA.children, { id: uid("c"), name, age: Number(age), startDate: startDate || "", teacherId: teacherId || null }];
+      CHILD_FORM = { name: "", age: "", startDate: "", teacherId: "" };
       persist();
     });
   }
-  document.querySelectorAll(".child-payday-select").forEach(el => el.addEventListener("change", () => {
-    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, paymentDay: Number(el.value) } : c);
+  document.querySelectorAll(".child-startdate-input").forEach(el => el.addEventListener("change", () => {
+    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, startDate: el.value || "" } : c);
     persist();
   }));
   document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventListener("change", () => {
@@ -785,6 +1081,10 @@ function attachAdminEvents() {
     persist();
   }));
   document.querySelectorAll(".del-child-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "child", id: el.dataset.id }; render(); }));
+  document.querySelectorAll(".del-cancellation-admin-btn").forEach(el => el.addEventListener("click", () => {
+    DATA.cancellations = DATA.cancellations.filter(x => x.id !== el.dataset.id);
+    persist();
+  }));
 
   // 시간표
   const addScheduleBtn = document.getElementById("add-schedule-btn");
@@ -814,6 +1114,7 @@ function attachAdminEvents() {
       DATA.children = DATA.children.filter(c => c.id !== id);
       DATA.schedule = DATA.schedule.filter(s => s.childId !== id);
       DATA.notes = DATA.notes.filter(n => n.childId !== id);
+      DATA.cancellations = DATA.cancellations.filter(x => x.childId !== id);
     } else if (type === "schedule") {
       DATA.schedule = DATA.schedule.filter(s => s.id !== id);
     }
@@ -826,11 +1127,24 @@ function attachAdminEvents() {
 /* ------------------------------------------------------------------ */
 /*  초기화                                                              */
 /* ------------------------------------------------------------------ */
+function migrateData(d) {
+  if (!Array.isArray(d.cancellations)) d.cancellations = [];
+  if (!Array.isArray(d.teachers)) d.teachers = [];
+  if (!Array.isArray(d.children)) d.children = [];
+  d.teachers = d.teachers.map(t => ({ ...t, pin: t.pin || "" }));
+  d.children = d.children.map(c => {
+    const nc = { ...c };
+    if (typeof nc.startDate !== "string") nc.startDate = "";
+    delete nc.paymentDay; // 이전 방식(매월 고정일 결제)은 더 이상 사용하지 않음
+    return nc;
+  });
+  return d;
+}
 (function init() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    DATA = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEFAULT_DATA));
-    if (!raw) localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+    DATA = raw ? migrateData(JSON.parse(raw)) : JSON.parse(JSON.stringify(DEFAULT_DATA));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
   } catch (e) {
     DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
   }
