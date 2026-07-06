@@ -157,9 +157,20 @@ const TEACHER_PALETTE = [
   { bg: "#E5EBF7", text: "#3E5A96" }, // 파랑
 ];
 function colorForTeacher(id) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 17 + id.charCodeAt(i)) >>> 0;
-  return TEACHER_PALETTE[hash % TEACHER_PALETTE.length];
+  // 고정된 색 8개를 나눠쓰지 않고, 색상환을 균등하게 회전시켜 매번 새로운 색을 배정.
+  // 황금각(137.508˚)만큼 계속 회전하기 때문에 교사가 아무리 많아져도 서로 겹치지 않음.
+  const idx = (DATA && Array.isArray(DATA.teachers)) ? DATA.teachers.findIndex(t => t.id === id) : -1;
+  let seed = idx;
+  if (seed === -1) {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 17 + id.charCodeAt(i)) >>> 0;
+    seed = hash;
+  }
+  const hue = (seed * 137.508) % 360;
+  return {
+    bg: `hsl(${hue.toFixed(1)}, 48%, 89%)`,
+    text: `hsl(${hue.toFixed(1)}, 48%, 28%)`,
+  };
 }
 function teacherBadgeHtml(teacher) {
   if (!teacher) return `<span style="font-size:11.5px;color:var(--ink-soft);">미배정</span>`;
