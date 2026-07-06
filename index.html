@@ -1145,6 +1145,8 @@ function migrateData(d) {
   if (!Array.isArray(d.cancellations)) d.cancellations = [];
   if (!Array.isArray(d.teachers)) d.teachers = [];
   if (!Array.isArray(d.children)) d.children = [];
+  if (!Array.isArray(d.schedule)) d.schedule = [];
+  if (!Array.isArray(d.notes)) d.notes = [];
   d.teachers = d.teachers.map(t => ({ ...t, pin: t.pin || "" }));
   d.children = d.children.map(c => {
     const nc = { ...c };
