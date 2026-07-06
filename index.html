@@ -339,8 +339,7 @@ function loginScreenHtml() {
     : `<div style="display:grid;gap:8px;">
         ${DATA.teachers.map(t => `
           <button class="btn btn-ghost teacher-login-btn" data-id="${t.id}" style="justify-content:flex-start;padding:12px 14px;font-size:14.5px;">
-            ${teacherAvatarHtml(t.name, t.id, 30)}
-            <span style="margin-left:4px;">${esc(t.name)} 선생님</span>
+            <span>${esc(t.name)} 선생님</span>
             <span style="margin-left:auto;">${icon('chevron', 16)}</span>
           </button>`).join("")}
       </div>`;
@@ -368,7 +367,6 @@ function loginScreenHtml() {
     <div class="modal-overlay" id="teacher-pin-overlay">
       <div class="card fadein" style="width:100%;max-width:340px;padding:22px;">
         <div style="text-align:center;margin-bottom:14px;">
-          ${teacherAvatarHtml(t.name, t.id, 44)}
           <h2 style="font-size:17px;font-weight:700;margin:10px 0 2px;">${esc(t.name)} 선생님</h2>
           <p style="font-size:12.5px;color:var(--ink-soft);">PIN 번호를 입력해주세요</p>
         </div>
@@ -993,13 +991,16 @@ function schedulePanelHtml() {
   const gridEntries = DATA.schedule.filter(s => gridChildIds.has(s.childId));
   const gridChildren = DATA.children.filter(c => gridChildIds.has(c.id));
 
-  const childOptions = `<option value="">아동 선택</option>` + DATA.children.map(c => {
+  const scheduleFormChildren = activeTeacher ? DATA.children.filter(c => c.teacherId === activeTeacher.id) : DATA.children;
+  const childOptions = `<option value="">아동 선택</option>` + scheduleFormChildren.map(c => {
     const t = DATA.teachers.find(tt => tt.id === c.teacherId);
     return `<option value="${c.id}" ${SCHEDULE_FORM.childId===c.id?"selected":""}>${esc(c.name)} ${t?`(${esc(t.name)})`:"(미배정)"}</option>`;
   }).join("");
   const dayOptions = DAYS.map(d => `<option value="${d}" ${SCHEDULE_FORM.day===d?"selected":""}>${d}요일</option>`).join("");
 
-  const sorted = [...DATA.schedule].sort((a,b) => DAYS.indexOf(a.day)-DAYS.indexOf(b.day) || a.time.localeCompare(b.time));
+  const sorted = [...DATA.schedule]
+    .filter(s => !activeTeacher || gridChildIds.has(s.childId))
+    .sort((a,b) => DAYS.indexOf(a.day)-DAYS.indexOf(b.day) || a.time.localeCompare(b.time));
   const rows = sorted.map(s => {
     const child = DATA.children.find(c => c.id === s.childId);
     const teacher = child ? DATA.teachers.find(t => t.id === child.teacherId) : null;
@@ -1021,7 +1022,7 @@ function schedulePanelHtml() {
       ? emptyStateHtml('users', "등록된 선생님이 없어요", "먼저 교사 관리에서 선생님을 등록해주세요.")
       : `${scheduleTeacherTabs}${timetableGridHtml(gridEntries, gridChildren, activeColor)}`}
 
-    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">시간표 관리</h2>
+    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">시간표 관리${activeTeacher ? ` · ${esc(activeTeacher.name)} 선생님` : ""}</h2>
     <div class="card" style="padding:16px;margin-bottom:14px;">
       <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;">새 수업 등록</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1219,6 +1220,7 @@ document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventList
   // 시간표: 교사별 탭 필터
   document.querySelectorAll(".schedule-view-tab").forEach(el => el.addEventListener("click", () => {
     SCHEDULE_VIEW_TEACHER = el.dataset.id;
+    SCHEDULE_FORM.childId = "";
     render();
   }));
 
