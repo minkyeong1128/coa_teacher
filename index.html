@@ -249,8 +249,12 @@ let CANCEL_OPEN = null;        // { childId, dateStr } 현재 사유 입력 중�
 let CANCEL_REASON_INPUT = "";
 let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
 
-function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); } catch (e) { console.error("저장 실패", e); }
+async function persist() {
+  try {
+    await window.storage.set('app-data', JSON.stringify(DATA), true);
+  } catch (e) {
+    console.error("저장 실패", e);
+  }
   render();
 }
 
@@ -1140,15 +1144,29 @@ function migrateData(d) {
   });
   return d;
 }
-(function init() {
+(async function init() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    DATA = raw ? migrateData(JSON.parse(raw)) : JSON.parse(JSON.stringify(DEFAULT_DATA));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+    const result = await window.storage.get('app-data', true);
+    DATA = result ? migrateData(JSON.parse(result.value)) : JSON.parse(JSON.stringify(DEFAULT_DATA));
   } catch (e) {
     DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
   }
   render();
+
+  // 다른 기기의 변경사항을 주기적으로 반영
+  setInterval(async () => {
+    try {
+      const result = await window.storage.get('app-data', true);
+      if (result) {
+        const fresh = migrateData(JSON.parse(result.value));
+        // 팝업/입력 중인 값이 사라지지 않도록, 데이터만 갱신
+        DATA = fresh;
+        render();
+      }
+    } catch (e) {
+      // 아직 저장된 데이터가 없을 때도 조용히 무시
+    }
+  }, 5000);
 })();
 </script>
 </body>
