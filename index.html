@@ -469,11 +469,14 @@ function timetableGridHtml(entries, children) {
                 const cell = entries.filter(e => e.day === day && e.time === time);
                 return `<td style="min-width:96px;vertical-align:top;"><div style="display:grid;gap:4px;">
                   ${cell.map(e => {
-                    const child = childMap[e.childId];
-                    if (!child) return "";
-                    const c = colorForChild(child.id);
-                    return `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:6px 8px;font-size:12.5px;font-weight:700;text-align:center;">${esc(child.name)}</div>`;
-                  }).join("")}
+  const child = childMap[e.childId];
+  if (!child) return "";
+  const c = colorForChild(child.id);
+  return `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:6px 8px;font-size:12.5px;font-weight:700;text-align:center;">
+    ${esc(child.name)}
+    ${e.endTime ? `<div style="font-size:10px;font-weight:500;opacity:.75;margin-top:2px;">${esc(e.time)}~${esc(e.endTime)}</div>` : ""}
+  </div>`;
+}).join("")}
                 </div></td>`;
               }).join("")}
             </tr>`).join("")}
@@ -876,20 +879,24 @@ function childrenPanelHtml() {
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
           ${avatarHtml(c.name, c.id, 38)}
           <div style="flex:1;">
-            <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
-            <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 ${info ? `· 다음 결제일 ${formatDate(info.nextDate)} (${dDayLabel(info.dleft)})` : "· 수업 시작일 미설정"}</div>
-          </div>
+          <div style="flex:1;">
+  <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
+  <div style="font-size:12px;color:var(--ink-soft);">${info ? `다음 결제일 ${formatDate(info.nextDate)} (${dDayLabel(info.dleft)})` : "수업 시작일 미설정"}</div>
+</div>
           ${PENDING_DELETE && PENDING_DELETE.type === "child" && PENDING_DELETE.id === c.id
             ? confirmInlineHtml("child", c.id)
             : `<button class="btn btn-danger del-child-btn" data-id="${c.id}" style="padding:7px 10px;">${icon('trash',14)}</button>`}
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">수업 시작일
-            <input type="date" class="input child-startdate-input" data-id="${c.id}" style="font-size:12.5px;padding:6px 8px;" value="${esc(c.startDate || "")}" />
-          </label>
-          <select class="select child-teacher-select" data-id="${c.id}" style="font-size:12.5px;">${options(c.teacherId)}</select>
-          ${!teacher ? `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>` : ""}
-        </div>
+       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+  <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">나이
+    <input type="number" min="0" class="input child-age-input" data-id="${c.id}" style="font-size:12.5px;padding:6px 8px;width:60px;" value="${c.age}" />세
+  </label>
+  <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">수업 시작일
+    <input type="date" class="input child-startdate-input" data-id="${c.id}" style="font-size:12.5px;padding:6px 8px;" value="${esc(c.startDate || "")}" />
+  </label>
+  <select class="select child-teacher-select" data-id="${c.id}" style="font-size:12.5px;">${options(c.teacherId)}</select>
+  ${!teacher ? `<span style="font-size:11.5px;color:var(--rose);align-self:center;">미배정</span>` : ""}
+</div>
       </div>`;
   }).join("");
 
@@ -930,7 +937,7 @@ function schedulePanelHtml() {
     return `
       <div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:10px;">
         <div style="font-weight:700;font-size:13px;width:40px;">${s.day}</div>
-        <div style="font-size:13px;color:var(--ink-soft);width:56px;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}</div>
+       <div style="font-size:13px;color:var(--ink-soft);white-space:nowrap;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}${s.endTime ? ` ~ ${s.endTime}` : ""}</div>
         <div style="flex:1;font-size:13.5px;font-weight:600;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
         <div style="font-size:12px;color:var(--ink-soft);">${teacher ? `${esc(teacher.name)} 선생님` : "미배정"}</div>
         ${PENDING_DELETE && PENDING_DELETE.type === "schedule" && PENDING_DELETE.id === s.id
@@ -946,7 +953,9 @@ function schedulePanelHtml() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <select id="sched-child" class="select" style="flex:2;min-width:140px;">${childOptions}</select>
         <select id="sched-day" class="select" style="min-width:80px;">${dayOptions}</select>
-        <input id="sched-time" class="input" style="min-width:100px;" type="time" value="${SCHEDULE_FORM.time}" />
+      <input id="sched-time" class="input" style="min-width:100px;" type="time" value="${SCHEDULE_FORM.time}" />
+<span style="align-self:center;color:var(--ink-soft);">~</span>
+<input id="sched-end-time" class="input" style="min-width:100px;" type="time" value="${SCHEDULE_FORM.endTime || ""}" />
         <button id="add-schedule-btn" class="btn btn-primary" style="padding:0 14px;">${icon('plus',14)} 추가</button>
       </div>
     </div>
@@ -1086,14 +1095,20 @@ function attachAdminEvents() {
       persist();
     });
   }
-  document.querySelectorAll(".child-startdate-input").forEach(el => el.addEventListener("change", () => {
-    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, startDate: el.value || "" } : c);
-    persist();
-  }));
-  document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventListener("change", () => {
-    DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, teacherId: el.value || null } : c);
-    persist();
-  }));
+  document.querySelectorAll(".child-age-input").forEach(el => el.addEventListener("change", () => {
+  const val = Number(el.value);
+  if (!val || val < 0) return;
+  DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, age: val } : c);
+  persist();
+}));
+document.querySelectorAll(".child-startdate-input").forEach(el => el.addEventListener("change", () => {
+  DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, startDate: el.value || "" } : c);
+  persist();
+}));
+document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventListener("change", () => {
+  DATA.children = DATA.children.map(c => c.id === el.dataset.id ? { ...c, teacherId: el.value || null } : c);
+  persist();
+}));
   document.querySelectorAll(".del-child-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "child", id: el.dataset.id }; render(); }));
   document.querySelectorAll(".del-cancellation-admin-btn").forEach(el => el.addEventListener("click", () => {
     DATA.cancellations = DATA.cancellations.filter(x => x.id !== el.dataset.id);
@@ -1104,13 +1119,14 @@ function attachAdminEvents() {
   const addScheduleBtn = document.getElementById("add-schedule-btn");
   if (addScheduleBtn) {
     addScheduleBtn.addEventListener("click", () => {
-      const childId = document.getElementById("sched-child").value;
-      const day = document.getElementById("sched-day").value;
-      const time = document.getElementById("sched-time").value;
-      if (!childId) return;
-      DATA.schedule = [...DATA.schedule, { id: uid("s"), childId, day, time }];
-      persist();
-    });
+  const childId = document.getElementById("sched-child").value;
+  const day = document.getElementById("sched-day").value;
+  const time = document.getElementById("sched-time").value;
+  const endTime = document.getElementById("sched-end-time").value;
+  if (!childId) return;
+  DATA.schedule = [...DATA.schedule, { id: uid("s"), childId, day, time, endTime: endTime || "" }];
+  persist();
+});
   }
   document.querySelectorAll(".del-schedule-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "schedule", id: el.dataset.id }; render(); }));
 
