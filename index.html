@@ -74,23 +74,11 @@
   table { border-collapse: separate; border-spacing: 6px; min-width: 640px; }
   #app { min-height: 100vh; }
 </style>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 <body>
 <div id="app"></div>
 
 <script>
-  const firebaseConfig = {
-  apiKey: "AIzaSyDRBWMt_zeP2mJKDUWkRerypOvHu8k8fCI",
-  authDomain: "koaedu-planner.firebaseapp.com",
-  databaseURL: "https://koaedu-planner-default-rtdb.firebaseio.com",
-  projectId: "koaedu-planner",
-  storageBucket: "koaedu-planner.firebasestorage.app",
-  messagingSenderId: "744023494239",
-  appId: "1:744023494239:web:5b52bcf619842a169155ea"
-};
-
 /* ------------------------------------------------------------------ */
 /*  아이콘 (lucide 스타일 인라인 SVG 문자열)                              */
 /* ------------------------------------------------------------------ */
@@ -261,9 +249,12 @@ let CANCEL_OPEN = null;        // { childId, dateStr } 현재 사유 입력 중�
 let CANCEL_REASON_INPUT = "";
 let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
 
-function persist() {
-  db.ref('app-data').set(DATA)
-    .catch(e => console.error("저장 실패", e));
+async function persist() {
+  try {
+    await window.storage.set('app-data', JSON.stringify(DATA), true);
+  } catch (e) {
+    console.error("저장 실패", e);
+  }
   render();
 }
 
@@ -1153,11 +1144,30 @@ function migrateData(d) {
   });
   return d;
 }
-db.ref('app-data').on('value', (snapshot) => {
-  const val = snapshot.val();
-  DATA = val ? migrateData(val) : JSON.parse(JSON.stringify(DEFAULT_DATA));
+(async function init() {
+  try {
+    const result = await window.storage.get('app-data', true);
+    DATA = result ? migrateData(JSON.parse(result.value)) : JSON.parse(JSON.stringify(DEFAULT_DATA));
+  } catch (e) {
+    DATA = JSON.parse(JSON.stringify(DEFAULT_DATA));
+  }
   render();
-});
+
+  // 다른 기기의 변경사항을 주기적으로 반영
+  setInterval(async () => {
+    try {
+      const result = await window.storage.get('app-data', true);
+      if (result) {
+        const fresh = migrateData(JSON.parse(result.value));
+        // 팝업/입력 중인 값이 사라지지 않도록, 데이터만 갱신
+        DATA = fresh;
+        render();
+      }
+    } catch (e) {
+      // 아직 저장된 데이터가 없을 때도 조용히 무시
+    }
+  }, 5000);
+})();
 </script>
 </body>
 </html>
