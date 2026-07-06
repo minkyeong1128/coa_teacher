@@ -578,7 +578,6 @@ function teacherAppHtml() {
     } else {
       body += `<div style="display:grid;gap:8px;">${myChildren.map(c => `
         <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
-          ${avatarHtml(c.name, c.id, 40)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
             <div style="font-size:12px;color:var(--ink-soft);">${c.age}세 ${c.startDate ? `· 수업 시작일 ${esc(c.startDate)}` : "· 수업 시작일 미설정"}</div>
@@ -627,7 +626,7 @@ function teacherAppHtml() {
       body += `<div style="display:grid;gap:14px;">${myChildren.map(c => {
         if (!c.startDate) {
           return `<div class="card" style="padding:14px;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">${avatarHtml(c.name,c.id,32)}<div style="font-weight:700;font-size:14px;">${esc(c.name)}</div></div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;"><div style="font-weight:700;font-size:14px;">${esc(c.name)}</div></div>
             <div style="font-size:12.5px;color:var(--ink-soft);">관리자님이 수업 시작일을 등록하면 휴강 체크를 할 수 있어요.</div>
           </div>`;
         }
@@ -655,7 +654,6 @@ function teacherAppHtml() {
         return `
           <div class="card" style="padding:14px;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-              ${avatarHtml(c.name, c.id, 32)}
               <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
             </div>
             <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">수업 예정일을 눌러 휴강을 등록하거나, 등록된 휴강을 눌러 취소할 수 있어요.</div>
@@ -699,7 +697,6 @@ function teacherAppHtml() {
     } else {
       body += `<div style="display:grid;gap:8px;">${paymentList.map(c => `
         <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
-          ${avatarHtml(c.name, c.id, 38)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
             <div style="font-size:12px;color:var(--ink-soft);">${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일이 설정되지 않았어요"}</div>
@@ -720,7 +717,6 @@ function teacherAppHtml() {
         <div style="display:grid;gap:8px;">
           ${duePayments.map(c => `
             <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:${c.dleft===0?"#F6EAD9":"var(--paper-2)"};">
-              ${avatarHtml(c.name, c.id, 32)}
               <div style="flex:1;">
                 <div style="font-weight:600;font-size:14px;">${esc(c.name)}</div>
                 <div style="font-size:11.5px;color:var(--ink-soft);">${formatDate(c.nextDate)} 결제 예정</div>
@@ -878,7 +874,6 @@ function teachersPanelHtml() {
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:12px;">
-          ${teacherAvatarHtml(t.name, t.id, 38)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14.5px;color:${tc.text};">${esc(t.name)} 선생님</div>
             <div style="font-size:12px;color:var(--ink-soft);">담당 아동 ${count}명 · PIN ${t.pin ? "설정됨" : "미설정"}</div>
@@ -931,7 +926,6 @@ function childrenPanelHtml() {
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
-          ${avatarHtml(c.name, c.id, 38)}
           <div style="flex:1;">
             <div style="font-weight:700;font-size:14.5px;">${esc(c.name)}</div>
             <div style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:4px;">
@@ -991,7 +985,7 @@ function schedulePanelHtml() {
         const tc = colorForTeacher(t.id);
         const isActive = SCHEDULE_VIEW_TEACHER === t.id;
         return `<div class="tab schedule-view-tab" data-id="${t.id}" style="background:${isActive ? tc.bg : "transparent"};color:${isActive ? tc.text : "var(--ink-soft)"};border:1px solid ${isActive ? tc.bg : "var(--line)"};">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${tc.text};margin-right:2px;"></span>${esc(t.name)} 선생님
+          ${esc(t.name)} 선생님
         </div>`;
       }).join("")}
     </div>`;
@@ -1079,7 +1073,6 @@ function paymentsPanelHtml() {
 
   const rowsHtml = rows.map(c => `
     <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
-      ${avatarHtml(c.name, c.id, 38)}
       <div style="flex:1;">
         <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
         <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
