@@ -126,8 +126,79 @@ function icon(name, size = 20, color) {
 /* ------------------------------------------------------------------ */
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const STORAGE_KEY = "visit_teacher_app_data_v1";
-const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], cancellations: [], payments: [], adminPin: "1234" };
 const SESSIONS_PER_CYCLE = 4; // 4회차마다 다음 달 교육비 선불 결제
+
+/*
+ * 공휴일/대체공휴일 기본값 (2025~2027년, 정부 발표 기준).
+ * 관리자는 설정 화면에서 이후 연도의 공휴일을 직접 추가/삭제할 수 있다.
+ * 보강 수업(makeupDate가 등록된 휴강)은 이 목록의 영향을 받지 않는다 — 협의 하에 주말/공휴일 진행 가능.
+ */
+const DEFAULT_HOLIDAYS = [
+  { date: "2025-01-01", name: "신정" },
+  { date: "2025-01-27", name: "임시공휴일(설날)" },
+  { date: "2025-01-28", name: "설날" },
+  { date: "2025-01-29", name: "설날" },
+  { date: "2025-01-30", name: "설날 연휴" },
+  { date: "2025-03-01", name: "삼일절" },
+  { date: "2025-03-03", name: "대체공휴일(삼일절)" },
+  { date: "2025-05-05", name: "어린이날·부처님오신날" },
+  { date: "2025-05-06", name: "대체공휴일" },
+  { date: "2025-06-03", name: "임시공휴일(대통령선거일)" },
+  { date: "2025-06-06", name: "현충일" },
+  { date: "2025-08-15", name: "광복절" },
+  { date: "2025-10-03", name: "개천절" },
+  { date: "2025-10-05", name: "추석 연휴" },
+  { date: "2025-10-06", name: "추석" },
+  { date: "2025-10-07", name: "추석 연휴" },
+  { date: "2025-10-08", name: "대체공휴일(추석)" },
+  { date: "2025-10-09", name: "한글날" },
+  { date: "2025-12-25", name: "성탄절" },
+  { date: "2026-01-01", name: "신정" },
+  { date: "2026-02-16", name: "설날 연휴" },
+  { date: "2026-02-17", name: "설날" },
+  { date: "2026-02-18", name: "설날 연휴" },
+  { date: "2026-03-01", name: "삼일절" },
+  { date: "2026-03-02", name: "대체공휴일(삼일절)" },
+  { date: "2026-05-01", name: "노동절" },
+  { date: "2026-05-05", name: "어린이날" },
+  { date: "2026-05-24", name: "부처님오신날" },
+  { date: "2026-05-25", name: "대체공휴일(부처님오신날)" },
+  { date: "2026-06-03", name: "임시공휴일(지방선거일)" },
+  { date: "2026-06-06", name: "현충일" },
+  { date: "2026-07-17", name: "제헌절" },
+  { date: "2026-08-15", name: "광복절" },
+  { date: "2026-08-17", name: "대체공휴일(광복절)" },
+  { date: "2026-09-24", name: "추석 연휴" },
+  { date: "2026-09-25", name: "추석" },
+  { date: "2026-09-26", name: "추석 연휴" },
+  { date: "2026-10-03", name: "개천절" },
+  { date: "2026-10-05", name: "대체공휴일(개천절)" },
+  { date: "2026-10-09", name: "한글날" },
+  { date: "2026-12-25", name: "성탄절" },
+  { date: "2027-01-01", name: "신정" },
+  { date: "2027-02-06", name: "설날 연휴" },
+  { date: "2027-02-07", name: "설날" },
+  { date: "2027-02-08", name: "설날 연휴" },
+  { date: "2027-02-09", name: "대체공휴일(설날)" },
+  { date: "2027-03-01", name: "삼일절" },
+  { date: "2027-05-01", name: "노동절" },
+  { date: "2027-05-05", name: "어린이날" },
+  { date: "2027-05-13", name: "부처님오신날" },
+  { date: "2027-06-06", name: "현충일" },
+  { date: "2027-08-15", name: "광복절" },
+  { date: "2027-08-16", name: "대체공휴일(광복절)" },
+  { date: "2027-09-14", name: "추석 연휴" },
+  { date: "2027-09-15", name: "추석" },
+  { date: "2027-09-16", name: "추석 연휴" },
+  { date: "2027-10-03", name: "개천절" },
+  { date: "2027-10-04", name: "대체공휴일(개천절)" },
+  { date: "2027-10-09", name: "한글날" },
+  { date: "2027-10-11", name: "대체공휴일(한글날)" },
+  { date: "2027-12-25", name: "성탄절" },
+  { date: "2027-12-27", name: "대체공휴일(성탄절)" },
+].map(h => ({ id: `hol_${h.date}`, ...h }));
+
+const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], cancellations: [], payments: [], adminPin: "1234", holidays: DEFAULT_HOLIDAYS.map(h => ({ ...h })) };
 
 function uid(prefix = "id") {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -190,19 +261,36 @@ function daysUntil(date) {
   const d0 = new Date(date); d0.setHours(0,0,0,0);
   return Math.round((d0 - today0) / 86400000);
 }
+/* 공휴일 목록에서 특정 날짜가 공휴일/대체공휴일인지 확인 */
+function isHoliday(dateStr, holidays) {
+  const list = holidays || (DATA && DATA.holidays) || [];
+  return list.some(h => h.date === dateStr);
+}
+function holidayName(dateStr, holidays) {
+  const list = holidays || (DATA && DATA.holidays) || [];
+  const h = list.find(h => h.date === dateStr);
+  return h ? h.name : "";
+}
+
 /*
- * 수업 시작일부터 매주 1회 수업을 한다고 가정하고, 휴강(취소)된 주는 회차에서 제외한다.
+ * 수업 시작일부터 매주 1회 수업을 한다고 가정하고, 휴강(취소)된 주와 공휴일/대체공휴일인 주는 회차에서 제외한다.
  * 유효 회차가 4의 배수가 되는 날 = 다음 달 교육비를 선불로 결제하는 날.
- * 휴강이 생기면 그만큼 유효 회차 도달 시점이 뒤로 밀리면서 결제일도 함께 밀린다.
+ * 휴강이나 공휴일이 생기면 그만큼 유효 회차 도달 시점이 뒤로 밀리면서(그 다음 주로) 결제일도 함께 밀린다.
  * 단, 보강일이 등록된 휴강은 실제로는 수업이 진행된 것으로 보아 회차에서 제외하지 않는다.
- * (= 보강을 하면 결제일이 밀리지 않는다.)
+ * (= 보강을 하면 결제일이 밀리지 않는다.) 보강 수업 자체는 공휴일 여부와 무관하게 진행될 수 있다.
  */
-function computePaymentInfo(child, cancellations, payments) {
+function computePaymentInfo(child, cancellations, payments, holidays) {
   if (!child.startDate) return null;
   const start = parseDateStr(child.startDate);
   const today = new Date(); today.setHours(0,0,0,0);
+  const holidayList = holidays || (DATA && DATA.holidays) || [];
   const myCancelDates = new Set(
     cancellations.filter(c => c.childId === child.id && !c.makeupDate).map(c => c.date)
+  );
+  // 보강일이 등록된 휴강 날짜 = 실제로 보강을 통해 수업이 진행된 것으로 보는 날짜.
+  // 이 날짜가 공휴일이더라도(협의 하에 보강 진행) 회차에서 제외하지 않는다.
+  const makeupCoveredDates = new Set(
+    cancellations.filter(c => c.childId === child.id && c.makeupDate).map(c => c.date)
   );
   // 이 아동에 대해 이미 입금 처리된 결제일들 (관리자가 입금일을 입력해 확정한 회차)
   const paidDueDates = new Set(
@@ -213,7 +301,8 @@ function computePaymentInfo(child, cancellations, payments) {
   let sessionsDoneBeforeToday = 0;
   for (let i = 0; i < 1000; i++) {
     const dateStr = toDateStr(d);
-    const isCancelled = myCancelDates.has(dateStr);
+    const isHolidaySkipped = isHoliday(dateStr, holidayList) && !makeupCoveredDates.has(dateStr);
+    const isCancelled = myCancelDates.has(dateStr) || isHolidaySkipped;
     if (!isCancelled) {
       validCount++;
       if (d < today) sessionsDoneBeforeToday = validCount;
@@ -256,7 +345,8 @@ function upcomingSessionDates(child, cancellations, pastCount = 2, futureCount =
   return all.slice(from, to).map(dt => {
     const dateStr = toDateStr(dt);
     const rec = myCancelMap.get(dateStr);
-    return { date: dt, dateStr, cancelled: !!rec, makeupDate: rec ? (rec.makeupDate || "") : "" };
+    const hName = holidayName(dateStr);
+    return { date: dt, dateStr, cancelled: !!rec, makeupDate: rec ? (rec.makeupDate || "") : "", isHoliday: !!hName, holidayName: hName };
   });
 }
 function formatDate(d) { return `${d.getMonth() + 1}월 ${d.getDate()}일`; }
@@ -300,6 +390,9 @@ let NOTES_FILTER_TEACHER = "";
 let PIN_SAVE_MSG = false;
 let CHILDREN_FILTER_TEACHER = "";
 let SCHEDULE_VIEW_TEACHER = "";
+let PAYMENTS_TAB = "due"; // "due" 결제 예정 | "confirmed" 입금 확인 | "overdue" 미납
+let NEW_HOLIDAY_DATE = "";
+let NEW_HOLIDAY_NAME = "";
 
 // 교사 로그인 PIN
 let TEACHER_LOGIN_ID = null;   // 이름 선택 후 PIN 입력 대기중인 교사 id
@@ -319,6 +412,10 @@ let CANCEL_MAKEUP_DATE_INPUT = ""; // 보강 예정일 입력값
 let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "", makeup: false, makeupDate: "" };
 let MAKEUP_EDIT_ID = null;   // 보강일을 수정 중인 휴강 기록 id
 let MAKEUP_EDIT_DATE = "";
+let EDIT_SCHEDULE_ID = null; // 요일/시간을 수정 중인 시간표 항목 id
+let EDIT_SCHEDULE_DAY = "";
+let EDIT_SCHEDULE_TIME = "";
+let EDIT_SCHEDULE_END_TIME = "";
 
 function persist() {
   db.ref('app-data').set(DATA)
@@ -655,6 +752,9 @@ function teacherAppHtml() {
         const chips = dates.map(dInfo => {
           const label = `${dInfo.date.getMonth()+1}/${dInfo.date.getDate()}`;
           const isOpen = CANCEL_OPEN && CANCEL_OPEN.childId === c.id && CANCEL_OPEN.dateStr === dInfo.dateStr;
+          if (dInfo.isHoliday) {
+            return `<span title="${esc(dInfo.holidayName)}" style="padding:6px 10px;font-size:12px;background:var(--paper-2);color:var(--ink-soft);border-radius:999px;display:inline-flex;align-items:center;gap:4px;">${label} · 공휴일(${esc(dInfo.holidayName)}) · 다음주로 밀림</span>`;
+          }
           if (dInfo.cancelled) {
             const rec = DATA.cancellations.find(x => x.childId === c.id && x.date === dInfo.dateStr);
             const hasMakeup = !!(rec && rec.makeupDate);
@@ -674,7 +774,7 @@ function teacherAppHtml() {
             <textarea id="cancel-reason-input" class="textarea" style="width:100%;min-height:56px;" placeholder="예) 교사 개인 사정으로 휴강합니다.">${esc(CANCEL_REASON_INPUT)}</textarea>
             <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
               <input type="checkbox" id="cancel-makeup-check" ${CANCEL_MAKEUP_CHECK ? "checked" : ""} />
-              보강 진행 예정
+              보강 진행 예정 
             </label>
             ${CANCEL_MAKEUP_CHECK ? `
               <div style="margin-top:8px;">
@@ -704,10 +804,10 @@ function teacherAppHtml() {
           </select>
           <input id="manual-cancel-date" class="input" type="date" style="min-width:150px;" value="${esc(CANCEL_MANUAL_FORM.date)}" />
         </div>
-        <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 기재">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
+        <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 (교사 개인 사정 등)">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
         <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
           <input type="checkbox" id="manual-cancel-makeup-check" ${CANCEL_MANUAL_FORM.makeup ? "checked" : ""} />
-          보강 진행 예정
+          보강 진행 예정 (결제일이 밀리지 않아요)
         </label>
         ${CANCEL_MANUAL_FORM.makeup ? `
           <input id="manual-cancel-makeup-date" class="input" type="date" style="width:100%;margin-top:6px;" value="${esc(CANCEL_MANUAL_FORM.makeupDate)}" />` : ""}
@@ -934,9 +1034,18 @@ function adminAppHtml() {
   else if (ADMIN_TAB === "payments") body = paymentsPanelHtml();
 
   const extra = `<button id="settings-open" class="btn btn-ghost" style="padding:8px 10px;">${icon('settings',14)}</button>`;
+  const sortedHolidays = [...DATA.holidays].sort((a,b) => a.date < b.date ? -1 : 1);
+  const holidaysListHtml = sortedHolidays.length === 0
+    ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:8px;">등록된 공휴일이 없어요.</div>`
+    : `<div style="display:grid;gap:6px;margin-top:10px;max-height:220px;overflow-y:auto;">${sortedHolidays.map(h => `
+        <div style="display:flex;align-items:center;gap:8px;background:var(--paper-2);border-radius:8px;padding:7px 10px;">
+          <div style="flex:1;font-size:12.5px;"><b>${esc(h.date)}</b> · ${esc(h.name)}</div>
+          <button class="btn btn-ghost del-holiday-btn" data-id="${h.id}" style="padding:4px;">${icon('trash',12)}</button>
+        </div>`).join("")}</div>`;
+
   const settingsModal = SHOW_SETTINGS ? `
     <div class="modal-overlay" id="settings-overlay">
-      <div class="card fadein" style="width:100%;max-width:360px;padding:22px;">
+      <div class="card fadein" style="width:100%;max-width:400px;padding:22px;max-height:88vh;overflow-y:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <h2 style="font-size:16px;font-weight:700;margin:0;">설정</h2>
           <button id="settings-close" class="btn btn-ghost" style="padding:6px;">${icon('x',16)}</button>
@@ -947,6 +1056,17 @@ function adminAppHtml() {
           <button id="save-pin-btn" class="btn btn-primary" style="padding:0 14px;">저장</button>
         </div>
         ${PIN_SAVE_MSG ? `<div style="color:var(--moss);font-size:12.5px;margin-top:8px;display:flex;gap:4px;align-items:center;">${icon('check',13)} 변경되었어요</div>` : ""}
+
+        <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:16px;">
+          <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);">공휴일 관리</label>
+          <p style="font-size:11.5px;color:var(--ink-soft);margin:4px 0 8px;">등록된 날짜는 수업 회차·결제 예정일 계산 시 자동으로 다음 주로 밀려요. 2025~2027년은 기본으로 등록되어 있고, 이후 연도는 직접 추가해주세요.</p>
+          <div style="display:flex;gap:8px;">
+            <input type="date" id="new-holiday-date" class="input" style="flex:1;" value="${esc(NEW_HOLIDAY_DATE)}" />
+            <input type="text" id="new-holiday-name" class="input" style="flex:1;" placeholder="공휴일 이름" value="${esc(NEW_HOLIDAY_NAME)}" />
+          </div>
+          <button id="add-holiday-btn" class="btn btn-primary" style="padding:8px 14px;margin-top:8px;width:100%;">${icon('plus',14)} 공휴일 추가</button>
+          ${holidaysListHtml}
+        </div>
       </div>
     </div>` : "";
 
@@ -1136,15 +1256,29 @@ function schedulePanelHtml() {
   const rows = sorted.map(s => {
     const child = DATA.children.find(c => c.id === s.childId);
     const teacher = child ? DATA.teachers.find(t => t.id === child.teacherId) : null;
+    const isEditing = EDIT_SCHEDULE_ID === s.id;
+    const editDayOptions = DAYS.map(d => `<option value="${d}" ${EDIT_SCHEDULE_DAY===d?"selected":""}>${d}요일</option>`).join("");
     return `
-      <div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:10px;">
-        <div style="font-weight:700;font-size:13px;width:40px;">${s.day}</div>
-       <div style="font-size:13px;color:var(--ink-soft);white-space:nowrap;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}${s.endTime ? ` ~ ${s.endTime}` : ""}</div>
-        <div style="flex:1;font-size:13.5px;font-weight:600;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
-        ${teacherBadgeHtml(teacher)}
-        ${PENDING_DELETE && PENDING_DELETE.type === "schedule" && PENDING_DELETE.id === s.id
-          ? confirmInlineHtml("schedule", s.id)
-          : `<button class="btn btn-ghost del-schedule-btn" data-id="${s.id}" style="padding:6px;">${icon('trash',13)}</button>`}
+      <div class="card" style="padding:10px 14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-weight:700;font-size:13px;width:40px;">${s.day}</div>
+         <div style="font-size:13px;color:var(--ink-soft);white-space:nowrap;display:flex;align-items:center;gap:4px;">${icon('clock',12)}${s.time}${s.endTime ? ` ~ ${s.endTime}` : ""}</div>
+          <div style="flex:1;font-size:13.5px;font-weight:600;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
+          ${teacherBadgeHtml(teacher)}
+          <button class="btn btn-ghost edit-schedule-btn" data-id="${s.id}" style="padding:6px;">${icon('pencil',13)}</button>
+          ${PENDING_DELETE && PENDING_DELETE.type === "schedule" && PENDING_DELETE.id === s.id
+            ? confirmInlineHtml("schedule", s.id)
+            : `<button class="btn btn-ghost del-schedule-btn" data-id="${s.id}" style="padding:6px;">${icon('trash',13)}</button>`}
+        </div>
+        ${isEditing ? `
+          <div class="fadein" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+            <select id="edit-sched-day" class="select" style="min-width:80px;">${editDayOptions}</select>
+            <input id="edit-sched-time" class="input" style="min-width:100px;" type="time" value="${EDIT_SCHEDULE_TIME}" />
+            <span style="align-self:center;color:var(--ink-soft);">~</span>
+            <input id="edit-sched-end-time" class="input" style="min-width:100px;" type="time" value="${EDIT_SCHEDULE_END_TIME || ""}" />
+            <button class="btn btn-primary save-schedule-btn" data-id="${s.id}" style="padding:0 14px;">저장</button>
+            <button class="btn btn-ghost cancel-schedule-btn" style="padding:0 14px;">취소</button>
+          </div>` : ""}
       </div>`;
   }).join("");
 
@@ -1205,38 +1339,66 @@ function paymentsPanelHtml() {
     return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, isOverdue: info ? info.isOverdue : false, teacher };
   }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
 
-  const rowsHtml = rows.map(c => `
+  const dueRows = rows.filter(c => c.nextDate && !c.isOverdue);
+  const overdueRows = rows.filter(c => c.nextDate && c.isOverdue);
+  const recentPayments = [...DATA.payments].sort((a,b) => a.paidDate < b.paidDate ? 1 : -1).slice(0, 30);
+
+  const paymentActionRowHtml = (c) => `
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input type="date" class="input pay-date-input" data-child="${c.id}" style="flex:1;font-size:12.5px;padding:8px 10px;" value="${todayStr}" />
+      <button class="btn btn-primary confirm-payment-btn" data-child="${c.id}" data-due="${toDateStr(c.nextDate)}" style="padding:0 14px;white-space:nowrap;">입금 확인</button>
+    </div>`;
+
+  const childRowHtml = (c) => `
     <div class="card" style="padding:14px;">
       <div style="display:flex;align-items:center;gap:12px;">
         <div style="flex:1;">
           <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
           <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${teacherBadgeHtml(c.teacher)}
-            <span>${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</span>
+            <span>다음 결제일 ${formatDate(c.nextDate)}</span>
           </div>
         </div>
-        ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.isOverdue?"#FBE3E1":c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.isOverdue?"#C0463A":c.dleft<=3?"var(--amber)":"var(--ink-soft)"};white-space:nowrap;">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>` : ""}
+        <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.isOverdue?"#FBE3E1":c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.isOverdue?"#C0463A":c.dleft<=3?"var(--amber)":"var(--ink-soft)"};white-space:nowrap;">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>
       </div>
-      ${c.nextDate ? `
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <input type="date" class="input pay-date-input" data-child="${c.id}" style="flex:1;font-size:12.5px;padding:8px 10px;" value="${todayStr}" />
-        <button class="btn btn-primary confirm-payment-btn" data-child="${c.id}" data-due="${toDateStr(c.nextDate)}" style="padding:0 14px;white-space:nowrap;">입금 확인</button>
-      </div>` : ""}
-    </div>`).join("");
+      ${paymentActionRowHtml(c)}
+    </div>`;
 
-  const recentPayments = [...DATA.payments].sort((a,b) => a.paidDate < b.paidDate ? 1 : -1).slice(0, 30);
-  const paymentsHistoryHtml = recentPayments.length === 0
-    ? `<div style="font-size:13px;color:var(--ink-soft);">입금 처리 내역이 없어요.</div>`
+  const dueHtml = dueRows.length === 0
+    ? emptyStateHtml('wallet', "결제 예정인 아동이 없어요")
+    : `<div style="display:grid;gap:8px;">${dueRows.map(childRowHtml).join("")}</div>`;
+
+  const overdueHtml = overdueRows.length === 0
+    ? emptyStateHtml('alert', "미납된 아동이 없어요")
+    : `<div style="display:grid;gap:8px;">${overdueRows.map(childRowHtml).join("")}</div>`;
+
+  const confirmedHtml = recentPayments.length === 0
+    ? emptyStateHtml('check', "입금 확인된 내역이 없어요")
     : `<div style="display:grid;gap:8px;">${recentPayments.map(p => {
         const child = DATA.children.find(cc => cc.id === p.childId);
+        const teacher = child ? DATA.teachers.find(t => t.id === child.teacherId) : null;
         return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
           <div style="flex:1;">
-            <div style="font-weight:700;font-size:13.5px;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
+            <div style="font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${child ? esc(child.name) : "(삭제된 아동)"} ${teacher ? teacherBadgeHtml(teacher) : ""}</div>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">결제 예정일 ${esc(p.dueDate)} · 입금일 ${esc(p.paidDate)}</div>
           </div>
           <button class="btn btn-ghost undo-payment-btn" data-id="${p.id}" style="padding:6px;">${icon('trash',13)}</button>
         </div>`;
       }).join("")}</div>`;
+
+  const paymentTabs = [
+    { key: "due", label: `결제 예정 (${dueRows.length})` },
+    { key: "confirmed", label: `입금 확인 (${recentPayments.length})` },
+    { key: "overdue", label: `미납 (${overdueRows.length})` },
+  ];
+  const tabsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+    ${paymentTabs.map(t => `<button class="tab payments-status-tab ${PAYMENTS_TAB === t.key ? "active" : ""}" data-key="${t.key}">${esc(t.label)}</button>`).join("")}
+  </div>`;
+
+  let body;
+  if (PAYMENTS_TAB === "confirmed") body = confirmedHtml;
+  else if (PAYMENTS_TAB === "overdue") body = overdueHtml;
+  else body = dueHtml;
 
   const cancellations = [...DATA.cancellations].sort((a,b) => a.date < b.date ? 1 : -1);
   const cancelHtml = cancellations.length === 0
@@ -1258,9 +1420,8 @@ function paymentsPanelHtml() {
 
   return `
     <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>
-    ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rowsHtml}</div>`}
-    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">입금 처리 내역</h2>
-    ${paymentsHistoryHtml}
+    ${tabsHtml}
+    ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : body}
     <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">휴강 내역</h2>
     ${cancelHtml}`;
 }
@@ -1268,6 +1429,7 @@ function paymentsPanelHtml() {
 function attachAdminEvents() {
   document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; SHOW_ADMIN_PAYMENT_POPUP = false; render(); });
   document.querySelectorAll("[data-tadmin]").forEach(el => el.addEventListener("click", () => { ADMIN_TAB = el.dataset.tadmin; render(); }));
+  document.querySelectorAll(".payments-status-tab").forEach(el => el.addEventListener("click", () => { PAYMENTS_TAB = el.dataset.key; render(); }));
 
   document.querySelectorAll(".confirm-payment-btn").forEach(el => el.addEventListener("click", () => {
     const childId = el.dataset.child;
@@ -1299,6 +1461,23 @@ function attachAdminEvents() {
       persist();
       setTimeout(() => { PIN_SAVE_MSG = false; render(); }, 1500);
     });
+    const newHolidayDate = document.getElementById("new-holiday-date");
+    const newHolidayName = document.getElementById("new-holiday-name");
+    if (newHolidayDate) newHolidayDate.addEventListener("input", (e) => { NEW_HOLIDAY_DATE = e.target.value; });
+    if (newHolidayName) newHolidayName.addEventListener("input", (e) => { NEW_HOLIDAY_NAME = e.target.value; });
+    const addHolidayBtn = document.getElementById("add-holiday-btn");
+    if (addHolidayBtn) addHolidayBtn.addEventListener("click", () => {
+      const dateVal = (document.getElementById("new-holiday-date").value || "").trim();
+      const nameVal = (document.getElementById("new-holiday-name").value || "").trim();
+      if (!dateVal || !nameVal) { alert("날짜와 공휴일 이름을 모두 입력해주세요."); return; }
+      DATA.holidays = [...DATA.holidays.filter(h => h.date !== dateVal), { id: `hol_${dateVal}`, date: dateVal, name: nameVal }];
+      NEW_HOLIDAY_DATE = ""; NEW_HOLIDAY_NAME = "";
+      persist();
+    });
+    document.querySelectorAll(".del-holiday-btn").forEach(el => el.addEventListener("click", () => {
+      DATA.holidays = DATA.holidays.filter(h => h.id !== el.dataset.id);
+      persist();
+    }));
   }
 
   // 교사 관리
@@ -1381,6 +1560,25 @@ document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventList
 });
   }
   document.querySelectorAll(".del-schedule-btn").forEach(el => el.addEventListener("click", () => { PENDING_DELETE = { type: "schedule", id: el.dataset.id }; render(); }));
+  document.querySelectorAll(".edit-schedule-btn").forEach(el => el.addEventListener("click", () => {
+    const s = DATA.schedule.find(x => x.id === el.dataset.id);
+    if (!s) return;
+    EDIT_SCHEDULE_ID = s.id;
+    EDIT_SCHEDULE_DAY = s.day;
+    EDIT_SCHEDULE_TIME = s.time;
+    EDIT_SCHEDULE_END_TIME = s.endTime || "";
+    render();
+  }));
+  document.querySelectorAll(".cancel-schedule-btn").forEach(el => el.addEventListener("click", () => { EDIT_SCHEDULE_ID = null; render(); }));
+  document.querySelectorAll(".save-schedule-btn").forEach(el => el.addEventListener("click", () => {
+    const day = document.getElementById("edit-sched-day").value;
+    const time = document.getElementById("edit-sched-time").value;
+    const endTime = document.getElementById("edit-sched-end-time").value;
+    if (!day || !time) return;
+    DATA.schedule = DATA.schedule.map(s => s.id === el.dataset.id ? { ...s, day, time, endTime: endTime || "" } : s);
+    EDIT_SCHEDULE_ID = null;
+    persist();
+  }));
 
   // 특이사항 필터
   const notesFilter = document.getElementById("notes-filter");
@@ -1396,6 +1594,7 @@ document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventList
   document.querySelectorAll(".schedule-view-tab").forEach(el => el.addEventListener("click", () => {
     SCHEDULE_VIEW_TEACHER = el.dataset.id;
     SCHEDULE_FORM.childId = "";
+    EDIT_SCHEDULE_ID = null;
     render();
   }));
 
@@ -1445,6 +1644,7 @@ function migrateData(d) {
   if (!Array.isArray(d.schedule)) d.schedule = [];
   if (!Array.isArray(d.notes)) d.notes = [];
   if (!Array.isArray(d.payments)) d.payments = [];
+  if (!Array.isArray(d.holidays)) d.holidays = DEFAULT_HOLIDAYS.map(h => ({ ...h }));
   d.cancellations = d.cancellations.map(x => ({ ...x, makeupDate: x.makeupDate || "" }));
   d.teachers = d.teachers.map(t => ({ ...t, pin: t.pin || "" }));
   d.children = d.children.map(c => {
