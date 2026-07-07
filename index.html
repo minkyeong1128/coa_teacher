@@ -126,7 +126,7 @@ function icon(name, size = 20, color) {
 /* ------------------------------------------------------------------ */
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const STORAGE_KEY = "visit_teacher_app_data_v1";
-const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], cancellations: [], adminPin: "1234" };
+const DEFAULT_DATA = { teachers: [], children: [], schedule: [], notes: [], cancellations: [], payments: [], adminPin: "1234" };
 const SESSIONS_PER_CYCLE = 4; // 4회차마다 다음 달 교육비 선불 결제
 
 function uid(prefix = "id") {
@@ -197,12 +197,16 @@ function daysUntil(date) {
  * 단, 보강일이 등록된 휴강은 실제로는 수업이 진행된 것으로 보아 회차에서 제외하지 않는다.
  * (= 보강을 하면 결제일이 밀리지 않는다.)
  */
-function computePaymentInfo(child, cancellations) {
+function computePaymentInfo(child, cancellations, payments) {
   if (!child.startDate) return null;
   const start = parseDateStr(child.startDate);
   const today = new Date(); today.setHours(0,0,0,0);
   const myCancelDates = new Set(
     cancellations.filter(c => c.childId === child.id && !c.makeupDate).map(c => c.date)
+  );
+  // 이 아동에 대해 이미 입금 처리된 결제일들 (관리자가 입금일을 입력해 확정한 회차)
+  const paidDueDates = new Set(
+    (payments || []).filter(p => p.childId === child.id).map(p => p.dueDate)
   );
   let validCount = 0;
   let d = new Date(start);
@@ -213,10 +217,13 @@ function computePaymentInfo(child, cancellations) {
     if (!isCancelled) {
       validCount++;
       if (d < today) sessionsDoneBeforeToday = validCount;
-      if (validCount % SESSIONS_PER_CYCLE === 0 && d >= today) {
+      // 결제 회차(4의 배수)에 도달했고, 아직 입금 처리가 안 된 가장 이른 회차를 찾는다.
+      // (지나간 회차라도 입금 기록이 없으면 미납으로 간주해 계속 알려준다)
+      if (validCount % SESSIONS_PER_CYCLE === 0 && !paidDueDates.has(dateStr)) {
         return {
           nextDate: new Date(d),
           dleft: daysUntil(d),
+          isOverdue: d < today,
           cycleProgress: sessionsDoneBeforeToday % SESSIONS_PER_CYCLE,
         };
       }
@@ -284,6 +291,8 @@ let SHOW_PIN_MODAL = false;
 let PIN_INPUT = "";
 let PIN_ERROR = "";
 let SHOW_PAYMENT_POPUP = false;
+let SHOW_ADMIN_PAYMENT_POPUP = false;
+let JUST_LOGGED_IN = false; // 로그인 직후(핀 입력 성공 직후) 1회만 true, 결제 팝업 표시용
 let SHOW_SETTINGS = false;
 let CHILD_FORM = { name: "", age: "", startDate: "", teacherId: "" };
 let SCHEDULE_FORM = { childId: "", day: "월", time: "10:00" };
@@ -443,6 +452,7 @@ function submitPin() {
   if ((PIN_INPUT || "").trim() === (DATA.adminPin || "").trim()) {
     SHOW_PIN_MODAL = false; PIN_INPUT = ""; PIN_ERROR = "";
     CURRENT_USER = { role: "admin" }; ADMIN_TAB = "teachers";
+    JUST_LOGGED_IN = true;
     render();
   } else {
     PIN_ERROR = "PIN 번호가 올바르지 않아요.";
@@ -458,6 +468,7 @@ function submitTeacherPin() {
   if (expected && inputVal === expected) {
     TEACHER_LOGIN_ID = null; TEACHER_PIN_INPUT = ""; TEACHER_PIN_ERROR = "";
     CURRENT_USER = { role: "teacher", id: t.id, name: t.name }; TEACHER_TAB = "timetable";
+    JUST_LOGGED_IN = true;
     render();
   } else if (!expected) {
     TEACHER_PIN_ERROR = "PIN이 아직 설정되지 않았어요. 관리자님께 문의해주세요.";
@@ -563,8 +574,8 @@ function teacherAppHtml() {
   const myChildIds = new Set(myChildren.map(c => c.id));
   const mySchedule = DATA.schedule.filter(s => myChildIds.has(s.childId));
   const paymentList = myChildren.map(c => {
-    const info = computePaymentInfo(c, DATA.cancellations);
-    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null };
+    const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
+    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, isOverdue: info ? info.isOverdue : false };
   }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
   const duePayments = paymentList.filter(c => c.dleft !== null && c.dleft <= 3);
 
@@ -744,7 +755,7 @@ function teacherAppHtml() {
             <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
             <div style="font-size:12px;color:var(--ink-soft);">${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일이 설정되지 않았어요"}</div>
           </div>
-          ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>` : ""}
+          ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.isOverdue?"#FBE3E1":c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.isOverdue?"#C0463A":c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>` : ""}
         </div>`).join("")}</div>`;
     }
   }
@@ -756,15 +767,15 @@ function teacherAppHtml() {
           <div style="padding:8px;border-radius:10px;background:#F6EAD9;">${icon('wallet',18,'var(--amber)')}</div>
           <h2 style="font-size:16.5px;font-weight:700;margin:0;">결제일 알림</h2>
         </div>
-        <p style="font-size:13px;color:var(--ink-soft);margin:6px 0 14px;">곧 결제일인 아동이 있어요.</p>
+        <p style="font-size:13px;color:var(--ink-soft);margin:6px 0 14px;">곧 결제일이거나 결제가 밀린 아동이 있어요.</p>
         <div style="display:grid;gap:8px;">
           ${duePayments.map(c => `
-            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:${c.dleft===0?"#F6EAD9":"var(--paper-2)"};">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:${c.isOverdue?"#FBE3E1":c.dleft===0?"#F6EAD9":"var(--paper-2)"};">
               <div style="flex:1;">
                 <div style="font-weight:600;font-size:14px;">${esc(c.name)}</div>
                 <div style="font-size:11.5px;color:var(--ink-soft);">${formatDate(c.nextDate)} 결제 예정</div>
               </div>
-              <div style="font-weight:700;font-size:13px;color:${c.dleft===0?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>
+              <div style="font-weight:700;font-size:13px;color:${c.isOverdue?"#C0463A":c.dleft===0?"var(--amber)":"var(--ink-soft)"};">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>
             </div>`).join("")}
         </div>
         <button id="close-payment-popup" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:16px;">확인했어요</button>
@@ -778,7 +789,7 @@ function teacherAppHtml() {
 }
 
 function attachTeacherEvents() {
-  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; render(); });
+  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; SHOW_PAYMENT_POPUP = false; render(); });
   document.querySelectorAll("[data-tteacher]").forEach(el => el.addEventListener("click", () => { TEACHER_TAB = el.dataset.tteacher; render(); }));
   document.querySelectorAll(".go-note-btn").forEach(el => el.addEventListener("click", () => { TEACHER_TAB = "notes"; NOTE_CHILD_ID = el.dataset.id; render(); }));
   document.querySelectorAll(".note-child-tab").forEach(el => el.addEventListener("click", () => { NOTE_CHILD_ID = el.dataset.id; NOTE_TEXT = ""; render(); }));
@@ -892,15 +903,15 @@ function attachTeacherEvents() {
     document.getElementById("close-payment-popup").addEventListener("click", () => { SHOW_PAYMENT_POPUP = false; render(); });
   }
 
-  // 결제 임박 팝업: 로그인 직후 1회 표시
-  if (!teacherAppHtml.__shownFor || teacherAppHtml.__shownFor !== CURRENT_USER.id) {
-    teacherAppHtml.__shownFor = CURRENT_USER.id;
+  // 결제 임박 팝업: 핀번호로 로그인할 때마다 표시 (결제 예정일 당일까지는 다시 로그인하면 반복해서 뜸)
+  if (JUST_LOGGED_IN) {
+    JUST_LOGGED_IN = false;
     const myChildren = DATA.children.filter(c => c.teacherId === CURRENT_USER.id);
     const due = myChildren.map(c => {
-      const info = computePaymentInfo(c, DATA.cancellations);
+      const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
       return { ...c, dleft: info ? info.dleft : null };
     }).filter(c => c.dleft !== null && c.dleft <= 3);
-    if (due.length > 0 && !SHOW_PAYMENT_POPUP) { SHOW_PAYMENT_POPUP = true; render(); }
+    if (due.length > 0) { SHOW_PAYMENT_POPUP = true; render(); }
   }
 }
 
@@ -939,10 +950,50 @@ function adminAppHtml() {
       </div>
     </div>` : "";
 
+  // 결제 임박/미납 아동을 결제일이 같은 그룹으로 묶기
+  const adminDueGroups = (() => {
+    const dueChildren = DATA.children.map(c => {
+      const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
+      return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, isOverdue: info ? info.isOverdue : false };
+    }).filter(c => c.dleft !== null && c.dleft <= 3);
+    const map = new Map();
+    dueChildren.forEach(c => {
+      const key = toDateStr(c.nextDate);
+      if (!map.has(key)) map.set(key, { date: c.nextDate, dleft: c.dleft, isOverdue: c.isOverdue, names: [] });
+      map.get(key).names.push(c.name);
+    });
+    return Array.from(map.values()).sort((a, b) => a.dleft - b.dleft);
+  })();
+
+  const adminPaymentPopup = SHOW_ADMIN_PAYMENT_POPUP && adminDueGroups.length > 0 ? `
+    <div class="modal-overlay" id="admin-payment-overlay">
+      <div class="card fadein" style="width:100%;max-width:400px;padding:22px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div style="padding:8px;border-radius:10px;background:#F6EAD9;">${icon('wallet',18,'var(--amber)')}</div>
+          <h2 style="font-size:16.5px;font-weight:700;margin:0;">결제일 알림</h2>
+        </div>
+        <p style="font-size:13px;color:var(--ink-soft);margin:6px 0 14px;">곧 결제일이거나 결제가 밀린 아동이 있어요.</p>
+        <div style="display:grid;gap:12px;max-height:360px;overflow-y:auto;">
+          ${adminDueGroups.map(g => `
+            <div style="border-radius:12px;background:${g.isOverdue?"#FBE3E1":g.dleft===0?"#F6EAD9":"var(--paper-2)"};padding:10px 12px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div style="font-size:11.5px;color:var(--ink-soft);">${formatDate(g.date)} 결제 예정</div>
+                <div style="font-weight:700;font-size:13px;color:${g.isOverdue?"#C0463A":g.dleft===0?"var(--amber)":"var(--ink-soft)"};">${g.isOverdue?"미납 · ":""}${dDayLabel(g.dleft)}</div>
+              </div>
+              <div style="display:grid;gap:4px;">
+                ${g.names.map(n => `<div style="font-weight:600;font-size:14px;">${esc(n)}</div>`).join("")}
+              </div>
+            </div>`).join("")}
+        </div>
+        <button id="close-admin-payment-popup" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:16px;">확인했어요</button>
+      </div>
+    </div>` : "";
+
   return `
     ${topBarHtml("관리자 대시보드", `선생님 ${DATA.teachers.length}명 · 아동 ${DATA.children.length}명`, tabs, ADMIN_TAB, "tadmin", extra)}
     <div style="max-width:920px;margin:0 auto;padding:18px 16px 60px;">${body}</div>
-    ${settingsModal}`;
+    ${settingsModal}
+    ${adminPaymentPopup}`;
 }
 
 function teachersPanelHtml() {
@@ -1001,7 +1052,7 @@ function childrenPanelHtml() {
 
  const rows = filteredChildren.map(c => {
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
-    const info = computePaymentInfo(c, DATA.cancellations);
+    const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
@@ -1010,7 +1061,7 @@ function childrenPanelHtml() {
             <div style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:4px;">
               <input type="number" min="0" class="input child-age-input" data-id="${c.id}"
                 style="width:38px;padding:1px 4px;font-size:12px;text-align:center;border-radius:6px;" value="${c.age}" />세
-              ${info ? `· 다음 결제일 ${formatDate(info.nextDate)} (${dDayLabel(info.dleft)})` : "· 수업 시작일 미설정"}
+              ${info ? `· 다음 결제일 ${formatDate(info.nextDate)} (${info.isOverdue ? "미납 · " : ""}${dDayLabel(info.dleft)})` : "· 수업 시작일 미설정"}
             </div>
           </div>
           ${PENDING_DELETE && PENDING_DELETE.type === "child" && PENDING_DELETE.id === c.id
@@ -1147,23 +1198,45 @@ function notesPanelHtml() {
 }
 
 function paymentsPanelHtml() {
+  const todayStr = toDateStr(new Date());
   const rows = DATA.children.map(c => {
-    const info = computePaymentInfo(c, DATA.cancellations);
+    const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
     const teacher = DATA.teachers.find(t => t.id === c.teacherId);
-    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, teacher };
+    return { ...c, nextDate: info ? info.nextDate : null, dleft: info ? info.dleft : null, isOverdue: info ? info.isOverdue : false, teacher };
   }).sort((a,b) => (a.dleft ?? 9999) - (b.dleft ?? 9999));
 
   const rowsHtml = rows.map(c => `
-    <div class="card" style="padding:14px;display:flex;align-items:center;gap:12px;">
-      <div style="flex:1;">
-        <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          ${teacherBadgeHtml(c.teacher)}
-          <span>${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</span>
+    <div class="card" style="padding:14px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:14px;">${esc(c.name)}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            ${teacherBadgeHtml(c.teacher)}
+            <span>${c.nextDate ? `다음 결제일 ${formatDate(c.nextDate)}` : "수업 시작일 미설정"}</span>
+          </div>
         </div>
+        ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.isOverdue?"#FBE3E1":c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.isOverdue?"#C0463A":c.dleft<=3?"var(--amber)":"var(--ink-soft)"};white-space:nowrap;">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>` : ""}
       </div>
-      ${c.nextDate ? `<div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.dleft<=3?"var(--amber)":"var(--ink-soft)"};">${dDayLabel(c.dleft)}</div>` : ""}
+      ${c.nextDate ? `
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <input type="date" class="input pay-date-input" data-child="${c.id}" style="flex:1;font-size:12.5px;padding:8px 10px;" value="${todayStr}" />
+        <button class="btn btn-primary confirm-payment-btn" data-child="${c.id}" data-due="${toDateStr(c.nextDate)}" style="padding:0 14px;white-space:nowrap;">입금 확인</button>
+      </div>` : ""}
     </div>`).join("");
+
+  const recentPayments = [...DATA.payments].sort((a,b) => a.paidDate < b.paidDate ? 1 : -1).slice(0, 30);
+  const paymentsHistoryHtml = recentPayments.length === 0
+    ? `<div style="font-size:13px;color:var(--ink-soft);">입금 처리 내역이 없어요.</div>`
+    : `<div style="display:grid;gap:8px;">${recentPayments.map(p => {
+        const child = DATA.children.find(cc => cc.id === p.childId);
+        return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:13.5px;">${child ? esc(child.name) : "(삭제된 아동)"}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">결제 예정일 ${esc(p.dueDate)} · 입금일 ${esc(p.paidDate)}</div>
+          </div>
+          <button class="btn btn-ghost undo-payment-btn" data-id="${p.id}" style="padding:6px;">${icon('trash',13)}</button>
+        </div>`;
+      }).join("")}</div>`;
 
   const cancellations = [...DATA.cancellations].sort((a,b) => a.date < b.date ? 1 : -1);
   const cancelHtml = cancellations.length === 0
@@ -1186,13 +1259,31 @@ function paymentsPanelHtml() {
   return `
     <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>
     ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : `<div style="display:grid;gap:8px;">${rowsHtml}</div>`}
+    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">입금 처리 내역</h2>
+    ${paymentsHistoryHtml}
     <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">휴강 내역</h2>
     ${cancelHtml}`;
 }
 
 function attachAdminEvents() {
-  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; render(); });
+  document.getElementById("logout-btn").addEventListener("click", () => { CURRENT_USER = null; SHOW_ADMIN_PAYMENT_POPUP = false; render(); });
   document.querySelectorAll("[data-tadmin]").forEach(el => el.addEventListener("click", () => { ADMIN_TAB = el.dataset.tadmin; render(); }));
+
+  document.querySelectorAll(".confirm-payment-btn").forEach(el => el.addEventListener("click", () => {
+    const childId = el.dataset.child;
+    const due = el.dataset.due;
+    const dateInput = document.querySelector(`.pay-date-input[data-child="${childId}"]`);
+    const paidDate = dateInput ? dateInput.value : "";
+    if (!due) return;
+    if (!paidDate) { alert("입금일을 선택해주세요."); return; }
+    DATA.payments.push({ id: uid("pay"), childId, dueDate: due, paidDate });
+    persist();
+  }));
+  document.querySelectorAll(".undo-payment-btn").forEach(el => el.addEventListener("click", () => {
+    if (!confirm("이 입금 처리를 취소할까요? 취소하면 다시 미납/결제 예정 상태로 돌아가요.")) return;
+    DATA.payments = DATA.payments.filter(p => p.id !== el.dataset.id);
+    persist();
+  }));
 
   const settingsOpen = document.getElementById("settings-open");
   if (settingsOpen) settingsOpen.addEventListener("click", () => { SHOW_SETTINGS = true; PIN_SAVE_MSG = false; render(); });
@@ -1309,6 +1400,22 @@ document.querySelectorAll(".child-teacher-select").forEach(el => el.addEventList
   }));
 
   // 삭제 확인/취소 공통
+  const adminPopupOverlay = document.getElementById("admin-payment-overlay");
+  if (adminPopupOverlay) {
+    adminPopupOverlay.addEventListener("mousedown", (e) => { if (e.target === adminPopupOverlay) { SHOW_ADMIN_PAYMENT_POPUP = false; render(); } });
+    document.getElementById("close-admin-payment-popup").addEventListener("click", () => { SHOW_ADMIN_PAYMENT_POPUP = false; render(); });
+  }
+
+  // 결제 임박 팝업: 핀번호로 로그인할 때마다 표시 (결제 예정일 당일까지는 다시 로그인하면 반복해서 뜸)
+  if (JUST_LOGGED_IN) {
+    JUST_LOGGED_IN = false;
+    const due = DATA.children.map(c => {
+      const info = computePaymentInfo(c, DATA.cancellations, DATA.payments);
+      return { ...c, dleft: info ? info.dleft : null };
+    }).filter(c => c.dleft !== null && c.dleft <= 3);
+    if (due.length > 0) { SHOW_ADMIN_PAYMENT_POPUP = true; render(); }
+  }
+
   document.querySelectorAll(".confirm-yes").forEach(el => el.addEventListener("click", () => {
     const { type, id } = el.dataset;
     if (type === "teacher") {
@@ -1337,6 +1444,7 @@ function migrateData(d) {
   if (!Array.isArray(d.children)) d.children = [];
   if (!Array.isArray(d.schedule)) d.schedule = [];
   if (!Array.isArray(d.notes)) d.notes = [];
+  if (!Array.isArray(d.payments)) d.payments = [];
   d.cancellations = d.cancellations.map(x => ({ ...x, makeupDate: x.makeupDate || "" }));
   d.teachers = d.teachers.map(t => ({ ...t, pin: t.pin || "" }));
   d.children = d.children.map(c => {
