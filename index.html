@@ -618,7 +618,7 @@ function teacherAppHtml() {
             ${myChildren.map(c => `<button class="tab note-child-tab ${NOTE_CHILD_ID === c.id ? "active" : ""}" data-id="${c.id}">${esc(c.name)}</button>`).join("")}
           </div>
           <textarea id="note-text" class="textarea" style="width:100%;min-height:90px;resize:vertical;"
-            placeholder="예) 오늘 낯가림이 조금 있었어요. 큰 소리에 놀라는 편이라 목소리 톤 조절이 필요해요.">${esc(NOTE_TEXT)}</textarea>
+            placeholder=" ">${esc(NOTE_TEXT)}</textarea>
           <button id="add-note-btn" class="btn btn-primary" style="padding:9px 16px;margin-top:10px;" ${!NOTE_TEXT.trim() ? "disabled" : ""}>${icon('plus',14)} 기록 추가</button>
           <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;">
             <div style="font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:8px;">지난 기록</div>
