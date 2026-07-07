@@ -194,12 +194,16 @@ function daysUntil(date) {
  * 수업 시작일부터 매주 1회 수업을 한다고 가정하고, 휴강(취소)된 주는 회차에서 제외한다.
  * 유효 회차가 4의 배수가 되는 날 = 다음 달 교육비를 선불로 결제하는 날.
  * 휴강이 생기면 그만큼 유효 회차 도달 시점이 뒤로 밀리면서 결제일도 함께 밀린다.
+ * 단, 보강일이 등록된 휴강은 실제로는 수업이 진행된 것으로 보아 회차에서 제외하지 않는다.
+ * (= 보강을 하면 결제일이 밀리지 않는다.)
  */
 function computePaymentInfo(child, cancellations) {
   if (!child.startDate) return null;
   const start = parseDateStr(child.startDate);
   const today = new Date(); today.setHours(0,0,0,0);
-  const myCancelDates = new Set(cancellations.filter(c => c.childId === child.id).map(c => c.date));
+  const myCancelDates = new Set(
+    cancellations.filter(c => c.childId === child.id && !c.makeupDate).map(c => c.date)
+  );
   let validCount = 0;
   let d = new Date(start);
   let sessionsDoneBeforeToday = 0;
@@ -241,8 +245,12 @@ function upcomingSessionDates(child, cancellations, pastCount = 2, futureCount =
   if (idx === -1) idx = all.length - 1;
   const from = Math.max(0, idx - pastCount);
   const to = Math.min(all.length, idx + futureCount + 1);
-  const myCancelDates = new Set(cancellations.filter(c => c.childId === child.id).map(c => c.date));
-  return all.slice(from, to).map(dt => ({ date: dt, dateStr: toDateStr(dt), cancelled: myCancelDates.has(toDateStr(dt)) }));
+  const myCancelMap = new Map(cancellations.filter(c => c.childId === child.id).map(c => [c.date, c]));
+  return all.slice(from, to).map(dt => {
+    const dateStr = toDateStr(dt);
+    const rec = myCancelMap.get(dateStr);
+    return { date: dt, dateStr, cancelled: !!rec, makeupDate: rec ? (rec.makeupDate || "") : "" };
+  });
 }
 function formatDate(d) { return `${d.getMonth() + 1}월 ${d.getDate()}일`; }
 function dDayLabel(dleft) {
@@ -297,7 +305,11 @@ let EDIT_TEACHER_PIN_VALUE = "";
 // 휴강(취소) 관리
 let CANCEL_OPEN = null;        // { childId, dateStr } 현재 사유 입력 중인 항목
 let CANCEL_REASON_INPUT = "";
-let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
+let CANCEL_MAKEUP_CHECK = false;   // 휴강 등록 시 "보강 진행 예정" 체크 여부
+let CANCEL_MAKEUP_DATE_INPUT = ""; // 보강 예정일 입력값
+let CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "", makeup: false, makeupDate: "" };
+let MAKEUP_EDIT_ID = null;   // 보강일을 수정 중인 휴강 기록 id
+let MAKEUP_EDIT_DATE = "";
 
 function persist() {
   db.ref('app-data').set(DATA)
@@ -356,7 +368,7 @@ function loginScreenHtml() {
           type="password" inputmode="numeric" maxlength="8" value="${esc(PIN_INPUT)}" placeholder="••••" autofocus />
         ${PIN_ERROR ? `<div style="color:var(--rose);font-size:12.5px;margin-bottom:8px;display:flex;gap:4px;align-items:center;">${icon('alert',13)} ${esc(PIN_ERROR)}</div>` : ""}
         <button id="pin-submit" class="btn btn-primary" style="width:100%;padding:10px 0;margin-top:6px;">로그인</button>
-        <p style="font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:10px;"></p>
+        <p style="font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:10px;">기본 PIN은 1234예요. 로그인 후 설정에서 바꿀 수 있어요.</p>
       </div>
     </div>` : "";
 
@@ -634,8 +646,13 @@ function teacherAppHtml() {
           const isOpen = CANCEL_OPEN && CANCEL_OPEN.childId === c.id && CANCEL_OPEN.dateStr === dInfo.dateStr;
           if (dInfo.cancelled) {
             const rec = DATA.cancellations.find(x => x.childId === c.id && x.date === dInfo.dateStr);
+            const hasMakeup = !!(rec && rec.makeupDate);
+            const bg = hasMakeup ? "#F6EAD9" : "#F5E1E4";
+            const color = hasMakeup ? "var(--amber)" : "var(--rose)";
+            const md = hasMakeup ? parseDateStr(rec.makeupDate) : null;
+            const suffix = hasMakeup ? ` → ${md.getMonth()+1}/${md.getDate()} 보강` : ' 휴강';
             return `<button class="btn cancel-chip-restore" data-child="${c.id}" data-date="${dInfo.dateStr}" title="${esc(rec ? rec.reason : "")}"
-              style="padding:6px 10px;font-size:12px;background:#F5E1E4;color:var(--rose);border-radius:999px;">${label} 휴강 ${icon('x',11)}</button>`;
+              style="padding:6px 10px;font-size:12px;background:${bg};color:${color};border-radius:999px;">${label}${suffix} ${icon('x',11)}</button>`;
           }
           return `<button class="btn cancel-chip-open" data-child="${c.id}" data-date="${dInfo.dateStr}"
             style="padding:6px 10px;font-size:12px;background:${isOpen? "var(--paper-2)":"transparent"};border:1px solid var(--line);border-radius:999px;color:var(--ink-soft);">${label}</button>`;
@@ -644,6 +661,15 @@ function teacherAppHtml() {
           <div class="fadein" style="margin-top:10px;padding:10px;background:var(--paper-2);border-radius:10px;">
             <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">${CANCEL_OPEN.dateStr} 휴강 사유</div>
             <textarea id="cancel-reason-input" class="textarea" style="width:100%;min-height:56px;" placeholder="예) 교사 개인 사정으로 휴강합니다.">${esc(CANCEL_REASON_INPUT)}</textarea>
+            <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
+              <input type="checkbox" id="cancel-makeup-check" ${CANCEL_MAKEUP_CHECK ? "checked" : ""} />
+              보강 진행 예정 (결제일이 밀리지 않아요)
+            </label>
+            ${CANCEL_MAKEUP_CHECK ? `
+              <div style="margin-top:8px;">
+                <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:4px;">보강 날짜</div>
+                <input type="date" id="cancel-makeup-date-input" class="input" style="width:100%;" value="${esc(CANCEL_MAKEUP_DATE_INPUT)}" />
+              </div>` : ""}
             <div style="display:flex;gap:8px;margin-top:8px;">
               <button class="btn btn-primary cancel-confirm-btn" data-child="${c.id}" data-date="${CANCEL_OPEN.dateStr}" style="padding:7px 12px;">${icon('check',13)} 휴강 등록</button>
               <button class="btn btn-ghost cancel-cancel-btn" style="padding:7px 12px;">취소</button>
@@ -668,6 +694,12 @@ function teacherAppHtml() {
           <input id="manual-cancel-date" class="input" type="date" style="min-width:150px;" value="${esc(CANCEL_MANUAL_FORM.date)}" />
         </div>
         <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 (교사 개인 사정 등)">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
+          <input type="checkbox" id="manual-cancel-makeup-check" ${CANCEL_MANUAL_FORM.makeup ? "checked" : ""} />
+          보강 진행 예정 (결제일이 밀리지 않아요)
+        </label>
+        ${CANCEL_MANUAL_FORM.makeup ? `
+          <input id="manual-cancel-makeup-date" class="input" type="date" style="width:100%;margin-top:6px;" value="${esc(CANCEL_MANUAL_FORM.makeupDate)}" />` : ""}
         <button id="manual-cancel-add-btn" class="btn btn-primary" style="padding:9px 16px;margin-top:10px;">${icon('plus',14)} 휴강 등록</button>
       </div>
       <div style="margin-top:18px;">
@@ -677,12 +709,25 @@ function teacherAppHtml() {
           if (mine.length === 0) return `<div style="font-size:13px;color:var(--ink-soft);">등록된 휴강이 없어요.</div>`;
           return `<div style="display:grid;gap:8px;">${mine.map(x => {
             const child = DATA.children.find(cc => cc.id === x.childId);
-            return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
-              <div style="flex:1;">
-                <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
-                <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${esc(x.reason || "사유 없음")}</div>
+            const isEditing = MAKEUP_EDIT_ID === x.id;
+            return `<div class="card" style="padding:12px 14px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="flex:1;">
+                  <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
+                  <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${esc(x.reason || "사유 없음")}</div>
+                  ${x.makeupDate
+                    ? `<div style="font-size:12px;color:var(--amber);margin-top:4px;font-weight:600;">${icon('calendar',12)} 보강일 ${esc(x.makeupDate)} · 결제일 유지</div>`
+                    : `<div style="font-size:11.5px;color:var(--rose);margin-top:4px;">보강 없음 · 결제일 밀림</div>`}
+                </div>
+                <button class="btn btn-ghost edit-makeup-btn" data-id="${x.id}" style="padding:6px;" title="보강일 설정">${icon('pencil',13)}</button>
+                <button class="btn btn-ghost del-cancellation-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
               </div>
-              <button class="btn btn-ghost del-cancellation-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
+              ${isEditing ? `
+                <div class="fadein" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+                  <input type="date" id="makeup-edit-date-input" class="input" style="flex:1;" value="${esc(MAKEUP_EDIT_DATE)}" />
+                  <button class="btn btn-primary save-makeup-btn" data-id="${x.id}" style="padding:7px 10px;">${icon('check',13)}</button>
+                  <button class="btn btn-ghost cancel-makeup-edit-btn" style="padding:7px 10px;">${icon('x',13)}</button>
+                </div>` : ""}
             </div>`;
           }).join("")}</div>`;
         })()}
@@ -765,7 +810,7 @@ function attachTeacherEvents() {
     if (CANCEL_OPEN && CANCEL_OPEN.childId === childId && CANCEL_OPEN.dateStr === dateStr) {
       CANCEL_OPEN = null;
     } else {
-      CANCEL_OPEN = { childId, dateStr }; CANCEL_REASON_INPUT = "";
+      CANCEL_OPEN = { childId, dateStr }; CANCEL_REASON_INPUT = ""; CANCEL_MAKEUP_CHECK = false; CANCEL_MAKEUP_DATE_INPUT = "";
     }
     render();
   }));
@@ -776,10 +821,20 @@ function attachTeacherEvents() {
   }));
   const cancelReasonInput = document.getElementById("cancel-reason-input");
   if (cancelReasonInput) cancelReasonInput.addEventListener("input", (e) => { CANCEL_REASON_INPUT = e.target.value; });
+  const cancelMakeupCheck = document.getElementById("cancel-makeup-check");
+  if (cancelMakeupCheck) cancelMakeupCheck.addEventListener("change", (e) => {
+    const reasonEl = document.getElementById("cancel-reason-input");
+    if (reasonEl) CANCEL_REASON_INPUT = reasonEl.value;
+    CANCEL_MAKEUP_CHECK = e.target.checked;
+    render();
+  });
+  const cancelMakeupDateInput = document.getElementById("cancel-makeup-date-input");
+  if (cancelMakeupDateInput) cancelMakeupDateInput.addEventListener("input", (e) => { CANCEL_MAKEUP_DATE_INPUT = e.target.value; });
   document.querySelectorAll(".cancel-confirm-btn").forEach(el => el.addEventListener("click", () => {
     const childId = el.dataset.child, dateStr = el.dataset.date;
-    DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date: dateStr, reason: CANCEL_REASON_INPUT.trim(), teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
-    CANCEL_OPEN = null; CANCEL_REASON_INPUT = "";
+    const makeupDate = CANCEL_MAKEUP_CHECK ? CANCEL_MAKEUP_DATE_INPUT : "";
+    DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date: dateStr, reason: CANCEL_REASON_INPUT.trim(), makeupDate, teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
+    CANCEL_OPEN = null; CANCEL_REASON_INPUT = ""; CANCEL_MAKEUP_CHECK = false; CANCEL_MAKEUP_DATE_INPUT = "";
     persist();
   }));
   document.querySelectorAll(".cancel-cancel-btn").forEach(el => el.addEventListener("click", () => { CANCEL_OPEN = null; render(); }));
@@ -790,18 +845,44 @@ function attachTeacherEvents() {
     const childId = document.getElementById("manual-cancel-child").value;
     const date = document.getElementById("manual-cancel-date").value;
     const reason = document.getElementById("manual-cancel-reason").value.trim();
+    const makeupDateEl = document.getElementById("manual-cancel-makeup-date");
+    const makeupDate = CANCEL_MANUAL_FORM.makeup ? (makeupDateEl ? makeupDateEl.value : "") : "";
     if (!childId || !date) return;
     const exists = DATA.cancellations.some(x => x.childId === childId && x.date === date);
     if (exists) {
-      DATA.cancellations = DATA.cancellations.map(x => (x.childId === childId && x.date === date) ? { ...x, reason } : x);
+      DATA.cancellations = DATA.cancellations.map(x => (x.childId === childId && x.date === date) ? { ...x, reason, makeupDate } : x);
     } else {
-      DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date, reason, teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
+      DATA.cancellations = [...DATA.cancellations, { id: uid("cx"), childId, date, reason, makeupDate, teacherId: CURRENT_USER.id, createdAt: new Date().toISOString() }];
     }
-    CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "" };
+    CANCEL_MANUAL_FORM = { childId: "", date: "", reason: "", makeup: false, makeupDate: "" };
     persist();
   });
+  const manualMakeupCheck = document.getElementById("manual-cancel-makeup-check");
+  if (manualMakeupCheck) manualMakeupCheck.addEventListener("change", (e) => {
+    CANCEL_MANUAL_FORM.childId = document.getElementById("manual-cancel-child").value;
+    CANCEL_MANUAL_FORM.date = document.getElementById("manual-cancel-date").value;
+    CANCEL_MANUAL_FORM.reason = document.getElementById("manual-cancel-reason").value;
+    CANCEL_MANUAL_FORM.makeup = e.target.checked;
+    render();
+  });
+  const manualMakeupDateInput = document.getElementById("manual-cancel-makeup-date");
+  if (manualMakeupDateInput) manualMakeupDateInput.addEventListener("input", (e) => { CANCEL_MANUAL_FORM.makeupDate = e.target.value; });
   document.querySelectorAll(".del-cancellation-btn").forEach(el => el.addEventListener("click", () => {
     DATA.cancellations = DATA.cancellations.filter(x => x.id !== el.dataset.id);
+    persist();
+  }));
+  document.querySelectorAll(".edit-makeup-btn").forEach(el => el.addEventListener("click", () => {
+    const rec = DATA.cancellations.find(x => x.id === el.dataset.id);
+    MAKEUP_EDIT_ID = el.dataset.id;
+    MAKEUP_EDIT_DATE = rec && rec.makeupDate ? rec.makeupDate : "";
+    render();
+  }));
+  document.querySelectorAll(".cancel-makeup-edit-btn").forEach(el => el.addEventListener("click", () => { MAKEUP_EDIT_ID = null; render(); }));
+  document.querySelectorAll(".save-makeup-btn").forEach(el => el.addEventListener("click", () => {
+    const id = el.dataset.id;
+    const val = document.getElementById("makeup-edit-date-input").value;
+    DATA.cancellations = DATA.cancellations.map(x => x.id === id ? { ...x, makeupDate: val || "" } : x);
+    MAKEUP_EDIT_ID = null;
     persist();
   }));
 
@@ -1094,6 +1175,9 @@ function paymentsPanelHtml() {
           <div style="flex:1;">
             <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${teacher?`${esc(teacher.name)} 선생님 · `:""}${esc(x.reason || "사유 없음")}</div>
+            ${x.makeupDate
+              ? `<div style="font-size:12px;color:var(--amber);margin-top:4px;font-weight:600;">${icon('calendar',12)} 보강일 ${esc(x.makeupDate)} · 결제일 유지</div>`
+              : `<div style="font-size:11.5px;color:var(--rose);margin-top:4px;">보강 없음 · 결제일 밀림</div>`}
           </div>
           <button class="btn btn-ghost del-cancellation-admin-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
         </div>`;
@@ -1253,6 +1337,7 @@ function migrateData(d) {
   if (!Array.isArray(d.children)) d.children = [];
   if (!Array.isArray(d.schedule)) d.schedule = [];
   if (!Array.isArray(d.notes)) d.notes = [];
+  d.cancellations = d.cancellations.map(x => ({ ...x, makeupDate: x.makeupDate || "" }));
   d.teachers = d.teachers.map(t => ({ ...t, pin: t.pin || "" }));
   d.children = d.children.map(c => {
     const nc = { ...c };
