@@ -771,7 +771,7 @@ function teacherAppHtml() {
         const openReasonBox = (CANCEL_OPEN && CANCEL_OPEN.childId === c.id) ? `
           <div class="fadein" style="margin-top:10px;padding:10px;background:var(--paper-2);border-radius:10px;">
             <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">${CANCEL_OPEN.dateStr} 휴강 사유</div>
-            <textarea id="cancel-reason-input" class="textarea" style="width:100%;min-height:56px;" placeholder="예) 교사 개인 사정으로 휴강합니다.">${esc(CANCEL_REASON_INPUT)}</textarea>
+            <textarea id="cancel-reason-input" class="textarea" style="width:100%;min-height:56px;" placeholder=" ">${esc(CANCEL_REASON_INPUT)}</textarea>
             <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
               <input type="checkbox" id="cancel-makeup-check" ${CANCEL_MAKEUP_CHECK ? "checked" : ""} />
               보강 진행 예정 
