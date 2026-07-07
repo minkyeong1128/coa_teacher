@@ -804,10 +804,10 @@ function teacherAppHtml() {
           </select>
           <input id="manual-cancel-date" class="input" type="date" style="min-width:150px;" value="${esc(CANCEL_MANUAL_FORM.date)}" />
         </div>
-        <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 (교사 개인 사정 등)">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
+        <textarea id="manual-cancel-reason" class="textarea" style="width:100%;min-height:56px;margin-top:8px;" placeholder="휴강 사유 기재">${esc(CANCEL_MANUAL_FORM.reason)}</textarea>
         <label style="display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
           <input type="checkbox" id="manual-cancel-makeup-check" ${CANCEL_MANUAL_FORM.makeup ? "checked" : ""} />
-          보강 진행 예정 (결제일이 밀리지 않아요)
+          보강 진행 예정
         </label>
         ${CANCEL_MANUAL_FORM.makeup ? `
           <input id="manual-cancel-makeup-date" class="input" type="date" style="width:100%;margin-top:6px;" value="${esc(CANCEL_MANUAL_FORM.makeupDate)}" />` : ""}
