@@ -707,7 +707,7 @@ function teacherAppHtml() {
 
   let body = "";
   if (TEACHER_TAB === "timetable") {
-    body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">이번 주 시간표</h2>${timetableGridHtml(mySchedule, myChildren)}`;
+    body = timetableGridHtml(mySchedule, myChildren);
   } else if (TEACHER_TAB === "children") {
     body = `<h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">내 아동 목록</h2>`;
     if (myChildren.length === 0) {
