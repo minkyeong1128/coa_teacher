@@ -1368,6 +1368,24 @@ function paymentsPanelHtml() {
       <button class="btn btn-primary confirm-payment-btn" data-child="${c.id}" data-due="${toDateStr(c.nextDate)}" style="padding:0 14px;white-space:nowrap;">입금 확인</button>
     </div>`;
 
+  const childCancellationsHtml = (childId) => {
+    const items = DATA.cancellations.filter(x => x.childId === childId).sort((a,b) => a.date < b.date ? 1 : -1);
+    if (items.length === 0) return "";
+    return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;gap:6px;">
+      ${items.map(x => {
+        return `<div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;">
+            <div style="font-size:12px;color:var(--ink-soft);">${icon('ban',11)} ${esc(x.date)} 휴강${x.reason?` · ${esc(x.reason)}`:""}</div>
+            ${x.makeupDate
+              ? `<div style="font-size:11.5px;color:var(--amber);font-weight:600;margin-top:2px;">${icon('calendar',11)} 보강일 ${esc(x.makeupDate)} · 결제일 유지</div>`
+              : ""}
+          </div>
+          <button class="btn btn-ghost del-cancellation-admin-btn" data-id="${x.id}" style="padding:4px;">${icon('trash',12)}</button>
+        </div>`;
+      }).join("")}
+    </div>`;
+  };
+
   const childRowHtml = (c) => `
     <div class="card" style="padding:14px;">
       <div style="display:flex;align-items:center;gap:12px;">
@@ -1380,6 +1398,7 @@ function paymentsPanelHtml() {
         </div>
         <div style="font-weight:700;font-size:12.5px;padding:5px 10px;border-radius:999px;background:${c.isOverdue?"#FBE3E1":c.dleft<=3?"#F6EAD9":"var(--paper-2)"};color:${c.isOverdue?"#C0463A":c.dleft<=3?"var(--amber)":"var(--ink-soft)"};white-space:nowrap;">${c.isOverdue?"미납 · ":""}${dDayLabel(c.dleft)}</div>
       </div>
+      ${childCancellationsHtml(c.id)}
       ${paymentActionRowHtml(c)}
     </div>`;
 
@@ -1419,30 +1438,10 @@ function paymentsPanelHtml() {
   else if (PAYMENTS_TAB === "overdue") body = overdueHtml;
   else body = dueHtml;
 
-  const cancellations = [...DATA.cancellations].sort((a,b) => a.date < b.date ? 1 : -1);
-  const cancelHtml = cancellations.length === 0
-    ? `<div style="font-size:13px;color:var(--ink-soft);">등록된 휴강이 없어요.</div>`
-    : `<div style="display:grid;gap:8px;">${cancellations.map(x => {
-        const child = DATA.children.find(cc => cc.id === x.childId);
-        const teacher = DATA.teachers.find(t => t.id === x.teacherId);
-        return `<div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:10px;">
-          <div style="flex:1;">
-            <div style="font-weight:700;font-size:13.5px;">${child?esc(child.name):"(삭제된 아동)"} · ${esc(x.date)}</div>
-            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${teacher?`${esc(teacher.name)} 선생님 · `:""}${esc(x.reason || "사유 없음")}</div>
-            ${x.makeupDate
-              ? `<div style="font-size:12px;color:var(--amber);margin-top:4px;font-weight:600;">${icon('calendar',12)} 보강일 ${esc(x.makeupDate)} · 결제일 유지</div>`
-              : ""}
-          </div>
-          <button class="btn btn-ghost del-cancellation-admin-btn" data-id="${x.id}" style="padding:6px;">${icon('trash',13)}</button>
-        </div>`;
-      }).join("")}</div>`;
-
   return `
     <h2 style="font-size:15px;font-weight:700;margin-bottom:10px;">결제 현황</h2>
     ${tabsHtml}
-    ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : body}
-    <h2 style="font-size:15px;font-weight:700;margin:22px 0 10px;">휴강 내역</h2>
-    ${cancelHtml}`;
+    ${rows.length === 0 ? emptyStateHtml('wallet', "등록된 아동이 없어요") : body}`;
 }
 
 function attachAdminEvents() {
